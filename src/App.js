@@ -66,7 +66,6 @@ function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(le
    Em desenvolvimento local, usa localhost:3000/api/...
 ═══════════════════════════════════════════ */
 const API_BASE = "";  // vazio = mesmo domínio (funciona local e no Vercel)
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fdFetch(ep, key, retries = 2) {
   const r = await fetch(`${API_BASE}/api/fd?endpoint=${encodeURIComponent(ep)}`, {
