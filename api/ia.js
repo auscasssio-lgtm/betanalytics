@@ -12,47 +12,76 @@ export default async function handler(req, res) {
   const { fixture, homeStats, awayStats, markets, leagueName, dateStr } = req.body;
   if (!fixture) return res.status(400).json({ error: "Dados da partida obrigatórios" });
 
-  const top = (markets || []).filter(m => m.rec === "APOSTAR").slice(0, 3);
+  // Todos os mercados agrupados por categoria
+  const mkResult   = (markets||[]).filter(m=>m.cat==="Resultado");
+  const mkGols     = (markets||[]).filter(m=>m.cat==="Over/Under"||m.cat==="Ambas Marcam"||m.cat==="Dupla Chance");
+  const mkEscanteios = (markets||[]).filter(m=>m.cat==="Escanteios");
 
-  const prompt = `Você é um analista profissional de apostas esportivas. Analise a partida e responda APENAS com JSON válido, sem texto adicional.
+  const fmtMarket = m => `  • ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | Score ${m.score}/10 | ${m.justif}`;
 
+  const prompt = `Você é um analista sênior de apostas esportivas com 15 anos de experiência. Sua tarefa é analisar ESTA partida específica e identificar a MELHOR oportunidade de aposta considerando todos os dados disponíveis.
+
+═══════════════════════════════════
 PARTIDA: ${fixture.homeTeam?.name} x ${fixture.awayTeam?.name}
-COMPETIÇÃO: ${leagueName}
-DATA: ${dateStr}
+COMPETIÇÃO: ${leagueName} | DATA: ${dateStr}
+═══════════════════════════════════
 
-ESTATÍSTICAS CASA (${fixture.homeTeam?.name}):
-- PPG: ${homeStats?.ppg || "N/D"} | Gols/J: ${homeStats?.goalsFor || "N/D"} | Sofridos/J: ${homeStats?.goalsAgainst || "N/D"}
-- Vitórias casa: ${homeStats?.winRateHome || "N/D"}% | BTTS: ${homeStats?.btts || "N/D"}%
-- Forma recente: ${homeStats?.form?.join(", ") || "N/D"}
+DADOS ESTATÍSTICOS — ${fixture.homeTeam?.name} (CASA):
+• PPG: ${homeStats?.ppg||"N/D"} | Gols marcados/j: ${homeStats?.goalsFor||"N/D"} | Gols sofridos/j: ${homeStats?.goalsAgainst||"N/D"}
+• % vitórias em casa: ${homeStats?.winRateHome||"N/D"}% | BTTS histórico: ${homeStats?.btts||"N/D"}%
+• Forma últimos 5 jogos: ${homeStats?.form?.join(" ")||"N/D"} | Jogos analisados: ${homeStats?.played||"N/D"}
 
-ESTATÍSTICAS VISITANTE (${fixture.awayTeam?.name}):
-- PPG: ${awayStats?.ppg || "N/D"} | Gols/J: ${awayStats?.goalsFor || "N/D"} | Sofridos/J: ${awayStats?.goalsAgainst || "N/D"}
-- Vitórias fora: ${awayStats?.winRateAway || "N/D"}% | BTTS: ${awayStats?.btts || "N/D"}%
-- Forma recente: ${awayStats?.form?.join(", ") || "N/D"}
+DADOS ESTATÍSTICOS — ${fixture.awayTeam?.name} (VISITANTE):
+• PPG: ${awayStats?.ppg||"N/D"} | Gols marcados/j: ${awayStats?.goalsFor||"N/D"} | Gols sofridos/j: ${awayStats?.goalsAgainst||"N/D"}
+• % vitórias fora: ${awayStats?.winRateAway||"N/D"}% | BTTS histórico: ${awayStats?.btts||"N/D"}%
+• Forma últimos 5 jogos: ${awayStats?.form?.join(" ")||"N/D"} | Jogos analisados: ${awayStats?.played||"N/D"}
 
-MERCADOS COM EV POSITIVO:
-${top.map(m => `- ${m.name}: Prob ${m.prob}%, Odd ${m.odd?.toFixed(2)}, EV ${m.ev}`).join("\n") || "Nenhum encontrado"}
+TODOS OS MERCADOS DISPONÍVEIS:
 
-Responda EXATAMENTE neste formato JSON:
+[RESULTADO]
+${mkResult.map(fmtMarket).join("\n")||"  N/D"}
+
+[GOLS / BTTS / DUPLA CHANCE]
+${mkGols.map(fmtMarket).join("\n")||"  N/D"}
+
+[ESCANTEIOS]
+${mkEscanteios.map(fmtMarket).join("\n")||"  N/D"}
+
+═══════════════════════════════════
+INSTRUÇÕES DE ANÁLISE:
+1. Analise os padrões estatísticos de cada time (ataque, defesa, forma, comportamento em casa/fora)
+2. Identifique inconsistências nas odds das casas (onde a probabilidade real supera a implícita)
+3. Considere o contexto: times ofensivos vs defensivos, confronto equilibrado vs desequilibrado
+4. NÃO repita os mesmos mercados sempre — escolha baseado nos dados DESTE jogo específico
+5. A aposta principal pode ser qualquer mercado, incluindo escanteios
+═══════════════════════════════════
+
+Responda APENAS com este JSON válido:
 {
-  "resumo": "2-3 frases resumindo o confronto",
-  "analise_casa": "análise detalhada do time da casa",
-  "analise_visitante": "análise detalhada do time visitante",
+  "resumo": "2-3 frases descrevendo o confronto e o contexto estatístico",
+  "analise_casa": "análise detalhada dos padrões do time da casa com base nos dados",
+  "analise_visitante": "análise detalhada dos padrões do visitante com base nos dados",
+  "perfil_jogo": "como você classifica esse jogo: ex: Defensivo, Ofensivo, Equilibrado, Dominância Casa, etc.",
   "placar_provavel": "X-Y",
-  "placar_justificativa": "justificativa em 1-2 frases",
+  "placar_justificativa": "justificativa baseada nos dados de ataque e defesa de cada time",
+  "escanteios_previsao": "faixa ex: 9-11",
+  "escanteios_analise": "análise do mercado de escanteios para este jogo específico",
+  "escanteios_aposta": "melhor mercado de escanteios com justificativa",
   "mercados": [
     {
-      "nome": "nome do mercado",
+      "nome": "nome exato do mercado da lista acima",
       "recomendacao": "APOSTAR ou ANALISAR ou EVITAR",
       "risco": "Baixo ou Médio ou Alto",
-      "justificativa": "análise de risco detalhada",
-      "confianca": 7
+      "justificativa": "por que este mercado é bom ou ruim PARA ESTE JOGO ESPECÍFICO",
+      "confianca": 8
     }
   ],
-  "aposta_principal": "nome do mercado mais recomendado",
-  "aposta_justificativa": "justificativa em 2-3 frases",
-  "alertas": ["alerta relevante se houver"],
-  "conclusao": "parágrafo final com conselho ao apostador"
+  "aposta_principal": "nome exato do mercado mais recomendado",
+  "aposta_justificativa": "justificativa completa de 2-3 frases explicando por que esta é a melhor aposta para ESTE jogo",
+  "segunda_opcao": "nome do segundo melhor mercado",
+  "segunda_opcao_justificativa": "justificativa breve",
+  "alertas": ["alerta específico sobre riscos ou incertezas deste jogo"],
+  "conclusao": "conselho final personalizado para este jogo, mencionando os times pelo nome"
 }`;
 
   try {
@@ -65,7 +94,7 @@ Responda EXATAMENTE neste formato JSON:
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
+        max_tokens: 2000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
