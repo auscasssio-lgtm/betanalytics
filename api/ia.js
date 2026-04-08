@@ -93,9 +93,12 @@ Responda APENAS com este JSON válido:
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 3000,
+        messages: [
+          { role: "user", content: prompt },
+          { role: "assistant", content: "{" }
+        ],
       }),
     });
 
@@ -106,7 +109,8 @@ Responda APENAS com este JSON válido:
 
     const data = await response.json();
     const text = data.content?.[0]?.text || "";
-    const clean = text.replace(/```json|```/g, "").trim();
+    // O prefill já começou com "{", então adicionamos de volta
+    const clean = ("{" + text).replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     return res.status(200).json(parsed);
   } catch (error) {
