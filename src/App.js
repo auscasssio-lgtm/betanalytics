@@ -16,13 +16,15 @@ const RS={APOSTAR:{color:T.green,bg:T.greenDim,border:"rgba(56,211,159,0.30)",ic
 
 /* ═══════════════════════════════════════════ CONSTANTS */
 const LEAGUES=[
-  {code:"BSA",name:"Brasileirão",    country:"Brasil",  flag:"🇧🇷",oddsKey:"soccer_brazil_campeonato"},
-  {code:"PL", name:"Premier League", country:"England", flag:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",oddsKey:"soccer_epl"},
-  {code:"PD", name:"La Liga",        country:"Spain",   flag:"🇪🇸",oddsKey:"soccer_spain_la_liga"},
-  {code:"SA", name:"Serie A",        country:"Italy",   flag:"🇮🇹",oddsKey:"soccer_italy_serie_a"},
-  {code:"BL1",name:"Bundesliga",     country:"Germany", flag:"🇩🇪",oddsKey:"soccer_germany_bundesliga"},
-  {code:"FL1",name:"Ligue 1",        country:"France",  flag:"🇫🇷",oddsKey:"soccer_france_ligue_1"},
-  {code:"CL", name:"Champions",      country:"Europe",  flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
+  {code:"BSA",name:"Brasileirão",    country:"Brasil",      flag:"🇧🇷",oddsKey:"soccer_brazil_campeonato"},
+  {code:"PL", name:"Premier League", country:"England",     flag:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",oddsKey:"soccer_epl"},
+  {code:"PD", name:"La Liga",        country:"Spain",       flag:"🇪🇸",oddsKey:"soccer_spain_la_liga"},
+  {code:"SA", name:"Serie A",        country:"Italy",       flag:"🇮🇹",oddsKey:"soccer_italy_serie_a"},
+  {code:"BL1",name:"Bundesliga",     country:"Germany",     flag:"🇩🇪",oddsKey:"soccer_germany_bundesliga"},
+  {code:"FL1",name:"Ligue 1",        country:"France",      flag:"🇫🇷",oddsKey:"soccer_france_ligue_1"},
+  {code:"CL", name:"Champions",      country:"Europe",      flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
+  {code:"CLI",name:"Libertadores",   country:"Sul-América", flag:"🏆",oddsKey:"soccer_conmebol_libertadores"},
+  {code:"CSA",name:"Sul-Americana",  country:"Sul-América", flag:"🌎",oddsKey:"soccer_conmebol_sudamericana"},
 ];
 const CURRENCIES=[{code:"BRL",symbol:"R$"},{code:"USD",symbol:"$"},{code:"EUR",symbol:"€"}];
 const FIB=[1,1,2,3,5,8,13,21,34,55];
@@ -38,6 +40,8 @@ const CORNER_STATS={
   BL1:{avg:10.5,homeAvg:5.6,awayAvg:4.9,over85:74,over95:61,over105:45},
   FL1:{avg:9.6, homeAvg:5.1,awayAvg:4.5,over85:67,over95:52,over105:36},
   CL: {avg:10.1,homeAvg:5.4,awayAvg:4.7,over85:71,over95:57,over105:41},
+  CLI:{avg:9.6, homeAvg:5.1,awayAvg:4.5,over85:67,over95:53,over105:37},
+  CSA:{avg:9.4, homeAvg:5.0,awayAvg:4.4,over85:65,over95:51,over105:35},
 };
 
 const LEAGUE_MARKET_STATS={
@@ -48,6 +52,8 @@ const LEAGUE_MARKET_STATS={
   BL1:[{market:"Over 2.5 Gols",winRate:70,sample:306,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:63,sample:306,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:46,sample:306,trend:"→"},{market:"Under 2.5 Gols",winRate:30,sample:306,trend:"↓"},{market:"Dupla Chance 1X",winRate:72,sample:306,trend:"↑"},{market:"Escanteios Over 8.5",winRate:74,sample:306,trend:"↑"},{market:"Escanteios Over 9.5",winRate:61,sample:306,trend:"↑"},{market:"Escanteios Over 10.5",winRate:45,sample:306,trend:"↑"}],
   FL1:[{market:"Over 2.5 Gols",winRate:60,sample:380,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:55,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:44,sample:380,trend:"↓"},{market:"Under 2.5 Gols",winRate:40,sample:380,trend:"↑"},{market:"Dupla Chance 1X",winRate:68,sample:380,trend:"→"},{market:"Escanteios Over 8.5",winRate:67,sample:380,trend:"→"},{market:"Escanteios Over 9.5",winRate:52,sample:380,trend:"→"},{market:"Escanteios Over 10.5",winRate:36,sample:380,trend:"↓"}],
   CL: [{market:"Over 2.5 Gols",winRate:66,sample:125,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:60,sample:125,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:50,sample:125,trend:"↑"},{market:"Under 2.5 Gols",winRate:34,sample:125,trend:"↓"},{market:"Dupla Chance 1X",winRate:73,sample:125,trend:"↑"},{market:"Escanteios Over 8.5",winRate:71,sample:125,trend:"↑"},{market:"Escanteios Over 9.5",winRate:57,sample:125,trend:"↑"},{market:"Escanteios Over 10.5",winRate:41,sample:125,trend:"→"}],
+  CLI:[{market:"Over 2.5 Gols",winRate:62,sample:200,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:56,sample:200,trend:"→"},{market:"1X2 – Vitória Casa",winRate:52,sample:200,trend:"↑"},{market:"Under 2.5 Gols",winRate:38,sample:200,trend:"↓"},{market:"Dupla Chance 1X",winRate:74,sample:200,trend:"↑"},{market:"Escanteios Over 8.5",winRate:67,sample:200,trend:"→"},{market:"Escanteios Over 9.5",winRate:53,sample:200,trend:"→"},{market:"Escanteios Over 10.5",winRate:37,sample:200,trend:"↓"}],
+  CSA:[{market:"Over 2.5 Gols",winRate:59,sample:180,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:53,sample:180,trend:"→"},{market:"1X2 – Vitória Casa",winRate:50,sample:180,trend:"→"},{market:"Under 2.5 Gols",winRate:41,sample:180,trend:"↑"},{market:"Dupla Chance 1X",winRate:72,sample:180,trend:"→"},{market:"Escanteios Over 8.5",winRate:65,sample:180,trend:"→"},{market:"Escanteios Over 9.5",winRate:51,sample:180,trend:"↓"},{market:"Escanteios Over 10.5",winRate:35,sample:180,trend:"↓"}],
 };
 
 const MARKET_INFO={
@@ -505,9 +511,17 @@ export default function App(){
     try{
       // Ligas europeias usam o ano de início da temporada (ex: 2025 para 2025/26)
       // Brasileirão e MLS usam o ano atual
+      // Cálculo automático da temporada — funciona para qualquer ano
+      // Ligas de ano calendário (BSA, Libertadores, Sul-Americana): usa o ano atual
+      // Ligas europeias (PL, SA, etc.): temporada começa em agosto do ano anterior
+      //   → se estamos em jan-jul: temporada = ano-1 (ex: jan/2026 → temporada 2025)
+      //   → se estamos em ago-dez: temporada = ano atual (ex: ago/2026 → temporada 2026)
       const calYear=selDate.getFullYear();
-      const seasonLeagues=["BSA","MLS"];
-      const season=seasonLeagues.includes(selLeague.code)?calYear:calYear-1;
+      const calMonth=selDate.getMonth(); // 0=jan, 7=ago
+      const calendarLeagues=["BSA","MLS","CLI","CSA"];
+      const season=calendarLeagues.includes(selLeague.code)
+        ? calYear
+        : (calMonth>=7 ? calYear : calYear-1);
       const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
       const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
@@ -530,8 +544,11 @@ export default function App(){
       let allOdds=[];
       try{allOdds=await oddsFetch(`sports/${scanLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);}catch{}
       const calYear=scanDate.getFullYear();
-      const seasonLeagues=["BSA","MLS"];
-      const season=seasonLeagues.includes(scanLeague.code)?calYear:calYear-1;
+      const calMonth=scanDate.getMonth();
+      const calendarLeagues=["BSA","MLS","CLI","CSA"];
+      const season=calendarLeagues.includes(scanLeague.code)
+        ? calYear
+        : (calMonth>=7 ? calYear : calYear-1);
       const results=[];
       const limit=Math.min(5,matches.length);
       for(let i=0;i<limit;i++){
