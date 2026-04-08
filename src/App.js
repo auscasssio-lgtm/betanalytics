@@ -334,58 +334,6 @@ function MarketCard({m,i,onRegister,bankroll,currency,strategy}){
   );
 }
 
-  return(
-    <div style={{border:`1px solid ${open?T.borderG:T.border}`,borderRadius:12,overflow:"hidden",background:open?"rgba(56,211,159,0.02)":i%2===0?"rgba(255,255,255,0.012)":T.card,transition:"all 0.2s"}}>
-      <div style={{display:"grid",gridTemplateColumns:"195px 1fr 85px 75px 75px 115px 36px",gap:10,alignItems:"center",padding:"13px 14px",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
-        <div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{fontWeight:700,fontSize:13,color:T.text}}>{m.name}</div>
-            {info&&<span style={{fontSize:9,color:T.blue,background:T.blueDim,border:`1px solid rgba(78,201,240,0.2)`,borderRadius:4,padding:"1px 5px"}}>?</span>}
-          </div>
-          <div style={{fontSize:10,color:T.muted,marginTop:2}}>{m.cat}</div>
-          <div style={{fontSize:10,color:T.muted,marginTop:3,lineHeight:1.4}}>{m.justif}</div>
-        </div>
-        <ScoreBar score={m.score}/>
-        <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:"'Barlow Condensed',sans-serif"}}>{m.prob}%</div></div>
-        <div style={{textAlign:"center"}}><div style={{fontSize:16,fontWeight:800,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{m.odd.toFixed(2)}</div><div style={{fontSize:9,color:T.muted}}>{m.hasRealOdd?"real":"est."}</div></div>
-        <div style={{textAlign:"center"}}><div style={{fontSize:15,fontWeight:800,color:m.ev>0?T.green:T.red,fontFamily:"'Barlow Condensed',sans-serif"}}>{m.ev>0?"+":""}{m.ev}</div></div>
-        <div style={{background:rs.bg,border:`1px solid ${rs.border}`,borderRadius:8,padding:"6px 8px",textAlign:"center",color:rs.color,fontWeight:800,fontSize:11,fontFamily:"'Barlow Condensed',sans-serif"}}>{rs.icon} {m.rec}</div>
-        <div style={{textAlign:"center",color:open?T.green:T.muted,fontSize:16,transition:"transform 0.25s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>⌄</div>
-      </div>
-      {open&&(
-        <div style={{borderTop:`1px solid ${T.border}`,padding:"18px 20px",background:"rgba(0,0,0,0.25)"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:18}}>
-            {/* Explicação */}
-            <div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.blue,marginBottom:10}}>📖 O que é?</div>
-              {info?(
-                <>
-                  <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:10}}>{info.explicacao}</div>
-                  <div style={{padding:"9px 13px",background:T.blueDim,border:`1px solid rgba(78,201,240,0.2)`,borderRadius:8,fontSize:12,color:T.blue,marginBottom:8}}>{info.exemplo}</div>
-                  <div style={{fontSize:12,color:T.gold}}>{info.dica}</div>
-                </>
-              ):<div style={{color:T.muted,fontSize:13}}>Sem descrição disponível.</div>}
-            </div>
-            {/* Dados da aposta */}
-            <div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.green,marginBottom:10}}>📊 Dados</div>
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                {[["Probabilidade estimada",`${m.prob}%`],["Odd",`${m.odd.toFixed(2)} (${m.hasRealOdd?"real":"estimada"})`],["EV",`${m.ev>0?"+":""}${m.ev}`],["Score",`${m.score}/10`],["Risco",m.ev>0.1?"Baixo":m.ev>0?"Médio":"Alto"],["Recomendação",m.rec]].map(([l,v])=>(
-                  <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 10px",background:"rgba(255,255,255,0.03)",borderRadius:7,border:`1px solid ${T.border}`}}>
-                    <span style={{fontSize:12,color:T.muted}}>{l}</span>
-                    <span style={{fontSize:12,fontWeight:700,color:T.text}}>{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* Sugestão de valor + entrada editável */}
-            <div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ═══════════════════════════════════════════ SETUP */
 function Setup({onSave}){
