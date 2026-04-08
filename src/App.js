@@ -29,14 +29,25 @@ const FIB=[1,1,2,3,5,8,13,21,34,55];
 const MONTH_NAMES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 // Ranking histórico de mercados por liga (dados baseados em estatísticas reais 2023-2025)
+// Médias históricas de escanteios por liga (dados 2023-2025)
+const CORNER_STATS={
+  BSA:{avg:10.2,homeAvg:5.4,awayAvg:4.8,over85:72,over95:58,over105:42},
+  PL: {avg:10.8,homeAvg:5.8,awayAvg:5.0,over85:76,over95:64,over105:48},
+  PD: {avg:9.8, homeAvg:5.2,awayAvg:4.6,over85:68,over95:54,over105:38},
+  SA: {avg:9.4, homeAvg:5.0,awayAvg:4.4,over85:65,over95:50,over105:34},
+  BL1:{avg:10.5,homeAvg:5.6,awayAvg:4.9,over85:74,over95:61,over105:45},
+  FL1:{avg:9.6, homeAvg:5.1,awayAvg:4.5,over85:67,over95:52,over105:36},
+  CL: {avg:10.1,homeAvg:5.4,awayAvg:4.7,over85:71,over95:57,over105:41},
+};
+
 const LEAGUE_MARKET_STATS={
-  BSA:[{market:"Over 2.5 Gols",winRate:58,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:55,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:47,sample:380,trend:"↓"},{market:"Under 2.5 Gols",winRate:42,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:72,sample:380,trend:"↑"}],
-  PL: [{market:"Over 2.5 Gols",winRate:68,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:62,sample:380,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:45,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:32,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:70,sample:380,trend:"↑"}],
-  PD: [{market:"Over 2.5 Gols",winRate:65,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:58,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:47,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:35,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:71,sample:380,trend:"↑"}],
-  SA: [{market:"Over 2.5 Gols",winRate:55,sample:380,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:52,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:46,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:45,sample:380,trend:"↑"},{market:"Dupla Chance 1X",winRate:70,sample:380,trend:"→"}],
-  BL1:[{market:"Over 2.5 Gols",winRate:70,sample:306,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:63,sample:306,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:46,sample:306,trend:"→"},{market:"Under 2.5 Gols",winRate:30,sample:306,trend:"↓"},{market:"Dupla Chance 1X",winRate:72,sample:306,trend:"↑"}],
-  FL1:[{market:"Over 2.5 Gols",winRate:60,sample:380,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:55,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:44,sample:380,trend:"↓"},{market:"Under 2.5 Gols",winRate:40,sample:380,trend:"↑"},{market:"Dupla Chance 1X",winRate:68,sample:380,trend:"→"}],
-  CL: [{market:"Over 2.5 Gols",winRate:66,sample:125,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:60,sample:125,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:50,sample:125,trend:"↑"},{market:"Under 2.5 Gols",winRate:34,sample:125,trend:"↓"},{market:"Dupla Chance 1X",winRate:73,sample:125,trend:"↑"}],
+  BSA:[{market:"Over 2.5 Gols",winRate:58,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:55,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:47,sample:380,trend:"↓"},{market:"Under 2.5 Gols",winRate:42,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:72,sample:380,trend:"↑"},{market:"Escanteios Over 8.5",winRate:72,sample:380,trend:"↑"},{market:"Escanteios Over 9.5",winRate:58,sample:380,trend:"→"},{market:"Escanteios Over 10.5",winRate:42,sample:380,trend:"→"}],
+  PL: [{market:"Over 2.5 Gols",winRate:68,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:62,sample:380,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:45,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:32,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:70,sample:380,trend:"↑"},{market:"Escanteios Over 8.5",winRate:76,sample:380,trend:"↑"},{market:"Escanteios Over 9.5",winRate:64,sample:380,trend:"↑"},{market:"Escanteios Over 10.5",winRate:48,sample:380,trend:"↑"}],
+  PD: [{market:"Over 2.5 Gols",winRate:65,sample:380,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:58,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:47,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:35,sample:380,trend:"↓"},{market:"Dupla Chance 1X",winRate:71,sample:380,trend:"↑"},{market:"Escanteios Over 8.5",winRate:68,sample:380,trend:"↑"},{market:"Escanteios Over 9.5",winRate:54,sample:380,trend:"→"},{market:"Escanteios Over 10.5",winRate:38,sample:380,trend:"→"}],
+  SA: [{market:"Over 2.5 Gols",winRate:55,sample:380,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:52,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:46,sample:380,trend:"→"},{market:"Under 2.5 Gols",winRate:45,sample:380,trend:"↑"},{market:"Dupla Chance 1X",winRate:70,sample:380,trend:"→"},{market:"Escanteios Over 8.5",winRate:65,sample:380,trend:"→"},{market:"Escanteios Over 9.5",winRate:50,sample:380,trend:"→"},{market:"Escanteios Over 10.5",winRate:34,sample:380,trend:"↓"}],
+  BL1:[{market:"Over 2.5 Gols",winRate:70,sample:306,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:63,sample:306,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:46,sample:306,trend:"→"},{market:"Under 2.5 Gols",winRate:30,sample:306,trend:"↓"},{market:"Dupla Chance 1X",winRate:72,sample:306,trend:"↑"},{market:"Escanteios Over 8.5",winRate:74,sample:306,trend:"↑"},{market:"Escanteios Over 9.5",winRate:61,sample:306,trend:"↑"},{market:"Escanteios Over 10.5",winRate:45,sample:306,trend:"↑"}],
+  FL1:[{market:"Over 2.5 Gols",winRate:60,sample:380,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:55,sample:380,trend:"→"},{market:"1X2 – Vitória Casa",winRate:44,sample:380,trend:"↓"},{market:"Under 2.5 Gols",winRate:40,sample:380,trend:"↑"},{market:"Dupla Chance 1X",winRate:68,sample:380,trend:"→"},{market:"Escanteios Over 8.5",winRate:67,sample:380,trend:"→"},{market:"Escanteios Over 9.5",winRate:52,sample:380,trend:"→"},{market:"Escanteios Over 10.5",winRate:36,sample:380,trend:"↓"}],
+  CL: [{market:"Over 2.5 Gols",winRate:66,sample:125,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:60,sample:125,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:50,sample:125,trend:"↑"},{market:"Under 2.5 Gols",winRate:34,sample:125,trend:"↓"},{market:"Dupla Chance 1X",winRate:73,sample:125,trend:"↑"},{market:"Escanteios Over 8.5",winRate:71,sample:125,trend:"↑"},{market:"Escanteios Over 9.5",winRate:57,sample:125,trend:"↑"},{market:"Escanteios Over 10.5",winRate:41,sample:125,trend:"→"}],
 };
 
 const MARKET_INFO={
@@ -50,6 +61,12 @@ const MARKET_INFO={
   "Dupla Chance 1X":{titulo:"Dupla Chance 1X",explicacao:"Você aposta em DOIS resultados: vitória da casa OU empate. Só perde se o visitante vencer.",exemplo:"Termina 2x0 → ✅ | Termina 1x1 → ✅ | Termina 0x1 → ❌",dica:"💡 Ideal quando confia que a casa não perde mas tem dúvida se vence."},
   "Escanteios Over 9.5":{titulo:"Escanteios Over 9.5 — 10+",explicacao:"O jogo terá 10 ou mais escanteios no total dos dois times.",exemplo:"6+5 = 11 escanteios → ✅ | 4+4 = 8 → ❌",dica:"💡 Times que jogam pelas laterais geram mais escanteios."},
   "Escanteios Over 10.5":{titulo:"Escanteios Over 10.5 — 11+",explicacao:"11 ou mais escanteios no total. Versão mais exigente.",exemplo:"6+6 = 12 → ✅ | 5+5 = 10 → ❌",dica:"💡 Reserve para times muito ofensivos com altas médias."},
+  "Escanteios Over 8.5":{titulo:"Escanteios Over 8.5 — 9+",explicacao:"O jogo terá 9 ou mais escanteios no total. É o mercado mais provável dos três.",exemplo:"5+4 = 9 escanteios → ✅ | 4+4 = 8 → ❌",dica:"💡 Odds mais baixas mas maior probabilidade — bom para acumuladores."},
+  "Escanteios Time Casa":{titulo:"Escanteios — Time da Casa bate mais",explicacao:"Você aposta que o time da casa cobrará mais escanteios do que o visitante no total do jogo.",exemplo:"Casa: 6 escanteios · Visit.: 4 escanteios → Casa vence ✅",dica:"💡 Times que atacam mais em casa naturalmente geram mais escanteios."},
+  "Escanteios Time Visit.":{titulo:"Escanteios — Time Visitante bate mais",explicacao:"Você aposta que o visitante cobrará mais escanteios do que a casa.",exemplo:"Visit.: 6 escanteios · Casa: 4 escanteios → Visitante vence ✅",dica:"💡 Favorável quando o visitante é amplamente superior e domina o jogo."},
+  "1º Escanteio — Casa":{titulo:"Primeiro Escanteio — Time da Casa",explicacao:"Você aposta que o time da casa cobrará o primeiro escanteio do jogo.",exemplo:"Primeiro escanteio aos 3min para a casa → ✅",dica:"💡 Times que pressionam no início do jogo tendem a bater o primeiro escanteio."},
+  "1º Escanteio — Visit.":{titulo:"Primeiro Escanteio — Visitante",explicacao:"Você aposta que o visitante cobrará o primeiro escanteio do jogo.",exemplo:"Primeiro escanteio aos 5min para o visitante → ✅",dica:"💡 Odds mais altas — favorável quando visitante tem estilo ofensivo e pressiona logo no início."},
+  "Handicap Escanteios Casa -1.5":{titulo:"Handicap Escanteios — Casa -1.5",explicacao:"O time da casa precisa bater 2 ou mais escanteios a mais que o visitante.",exemplo:"Casa 7 · Visit. 4 = diferença +3 → Casa cobre -1.5 ✅ | Casa 6 · Visit. 5 = +1 → ❌",dica:"💡 Ideal quando a casa é claramente superior e controla o jogo no ataque."},
 };
 
 /* ═══════════════════════════════════════════ HELPERS */
@@ -119,7 +136,7 @@ function parseStatsFD(resp,teamId){
   return{ppg:+((w*3+d)/n).toFixed(2),goalsFor:+(gf/n).toFixed(2),goalsAgainst:+(ga/n).toFixed(2),winRateHome:ph?Math.round(wh/ph*100):0,winRateAway:pa?Math.round(wa/pa*100):0,btts:Math.round(btts/n*100),played:n,form:matches.slice(-5).map(m=>{const isH=m.homeTeam?.id===teamId;const gs=isH?(m.score?.fullTime?.home||0):(m.score?.fullTime?.away||0);const gc=isH?(m.score?.fullTime?.away||0):(m.score?.fullTime?.home||0);return gs>gc?"W":gs===gc?"D":"L";})};
 }
 
-function buildMarkets(hs,as_,oddsData){
+function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
   const hppg=hs?.ppg||1.2,appg=as_?.ppg||1.0;
   const hgf=hs?.goalsFor||1.3,agf=as_?.goalsFor||1.1;
   const hwr=hs?.winRateHome||40,awr=as_?.winRateAway||32;
@@ -132,6 +149,32 @@ function buildMarkets(hs,as_,oddsData){
   const o35=clamp(Math.round(totalG>=3.5?60:totalG>=3?44:26),14,72);
   const bttp=clamp(Math.round((hbtts+abtts)/2),20,80);
   const dc1x=clamp(hwp+dwp,50,95);
+
+  // Escanteios — usa médias históricas da liga + estilo ofensivo dos times
+  const cs=CORNER_STATS[leagueCode]||CORNER_STATS.BSA;
+  // Fator ofensivo: times com mais gols tendem a gerar mais escanteios
+  const offFactor=clamp((hgf+agf)/2.4,0.8,1.3);
+  // Fator pressão: times com mais vitórias em casa pressionam mais
+  const pressFactor=clamp((hwr+awr)/80,0.9,1.2);
+  const cornerFactor=offFactor*pressFactor;
+  const expCorners=+(cs.avg*cornerFactor).toFixed(1);
+  const homeCorners=+(cs.homeAvg*(hgf/1.3)*clamp(hwr/45,0.8,1.3)).toFixed(1);
+  const awayCorners=+(cs.awayAvg*(agf/1.1)*clamp(awr/35,0.8,1.3)).toFixed(1);
+
+  const o85=clamp(Math.round(cs.over85*cornerFactor),45,90);
+  const o95=clamp(Math.round(cs.over95*cornerFactor),30,80);
+  const o105=clamp(Math.round(cs.over105*cornerFactor),18,68);
+
+  // Quem bate mais escanteios
+  const homeMoreCorners=clamp(Math.round(50+(homeCorners-awayCorners)*8),25,78);
+  const awayMoreCorners=100-homeMoreCorners;
+
+  // Primeiro escanteio (proporcional à pressão no início)
+  const firstCornHome=clamp(Math.round(50+(hwr-awr)*0.3+(hgf-agf)*5),35,68);
+  const firstCornAway=100-firstCornHome;
+
+  // Handicap escanteios casa -1.5
+  const hcCornerHome=clamp(Math.round(homeMoreCorners*0.72),20,60);
 
   const ro={};
   if(oddsData?.bookmakers?.length){
@@ -146,14 +189,25 @@ function buildMarkets(hs,as_,oddsData){
   const rec=(p,t1,t2)=>p>=t1?"APOSTAR":p>=t2?"ANALISAR":"EVITAR";
 
   return[
+    // Mercados de resultado
     {name:"1X2 – Vitória Casa",   cat:"Resultado",    prob:hwp, odd:ro.home||1.90,  score:sc(hwp), rec:rec(hwp,62,45), ev:ev(hwp,ro.home||1.90),  justif:`Aproveit. casa: ${hwr}% · PPG: ${hppg.toFixed(2)}`},
     {name:"Empate (X)",           cat:"Resultado",    prob:dwp, odd:ro.draw||3.20,  score:sc(dwp), rec:rec(dwp,35,25), ev:ev(dwp,ro.draw||3.20),  justif:`Prob. de empate: ${dwp}%`},
     {name:"1X2 – Vitória Visit.", cat:"Resultado",    prob:awp, odd:ro.away||2.60,  score:sc(awp), rec:rec(awp,55,40), ev:ev(awp,ro.away||2.60),  justif:`Aproveit. fora: ${awr}% · PPG: ${appg.toFixed(2)}`},
+    // Mercados de gols
     {name:"Over 2.5 Gols",        cat:"Over/Under",   prob:o25, odd:ro.over25||1.85,score:sc(o25), rec:rec(o25,65,50), ev:ev(o25,ro.over25||1.85),justif:`Média total: ${totalG.toFixed(2)} gols/j`},
     {name:"Over 3.5 Gols",        cat:"Over/Under",   prob:o35, odd:ro.over35||2.35,score:sc(o35), rec:rec(o35,55,40), ev:ev(o35,ro.over35||2.35),justif:`Requer ataque forte · média ${totalG.toFixed(2)}`},
     {name:"Under 2.5 Gols",       cat:"Over/Under",   prob:100-o25,odd:ro.under25||2.00,score:sc(100-o25),rec:rec(100-o25,52,40),ev:ev(100-o25,ro.under25||2.00),justif:`Under favorecido quando média ≤ 2.5`},
     {name:"BTTS – Ambas Marcam",  cat:"Ambas Marcam", prob:bttp,odd:1.90,           score:sc(bttp), rec:rec(bttp,62,50), ev:ev(bttp,1.90),          justif:`BTTS casa ${hbtts}%, visit. ${abtts}%`},
     {name:"Dupla Chance 1X",      cat:"Dupla Chance", prob:dc1x,odd:1.25,           score:sc(dc1x), rec:rec(dc1x,72,58), ev:ev(dc1x,1.25),          justif:`Cobre vitória + empate · ${dc1x}%`},
+    // Mercados de escanteios
+    {name:"Escanteios Over 8.5",        cat:"Escanteios",    prob:o85,           odd:1.65,score:sc(o85),           rec:rec(o85,72,58),           ev:ev(o85,1.65),           justif:`Prev. ${expCorners} escanteios · Liga: ${cs.avg} média`},
+    {name:"Escanteios Over 9.5",        cat:"Escanteios",    prob:o95,           odd:1.90,score:sc(o95),           rec:rec(o95,62,48),           ev:ev(o95,1.90),           justif:`${homeCorners.toFixed(1)} (casa) + ${awayCorners.toFixed(1)} (visit.) esperados`},
+    {name:"Escanteios Over 10.5",       cat:"Escanteios",    prob:o105,          odd:2.20,score:sc(o105),          rec:rec(o105,52,40),          ev:ev(o105,2.20),          justif:`Requer jogo aberto · ${cs.over105}% histórico na liga`},
+    {name:"Escanteios Time Casa",       cat:"Escanteios",    prob:homeMoreCorners,odd:1.85,score:sc(homeMoreCorners),rec:rec(homeMoreCorners,60,45),ev:ev(homeMoreCorners,1.85),justif:`Casa: ${homeCorners.toFixed(1)} · Visit.: ${awayCorners.toFixed(1)} escanteios esperados`},
+    {name:"Escanteios Time Visit.",     cat:"Escanteios",    prob:awayMoreCorners,odd:2.10,score:sc(awayMoreCorners),rec:rec(awayMoreCorners,55,40),ev:ev(awayMoreCorners,2.10),justif:`Visitante precisa dominar territoriamente`},
+    {name:"1º Escanteio — Casa",        cat:"Escanteios",    prob:firstCornHome, odd:1.80,score:sc(firstCornHome), rec:rec(firstCornHome,60,45), ev:ev(firstCornHome,1.80), justif:`Casa pressiona mais no início · ${hwr}% aproveit. em casa`},
+    {name:"1º Escanteio — Visit.",      cat:"Escanteios",    prob:firstCornAway, odd:2.10,score:sc(firstCornAway), rec:rec(firstCornAway,52,38), ev:ev(firstCornAway,2.10), justif:`Odds maiores por ser menos provável`},
+    {name:"Handicap Escanteios Casa -1.5",cat:"Escanteios",  prob:hcCornerHome,  odd:2.00,score:sc(hcCornerHome),  rec:rec(hcCornerHome,52,38),  ev:ev(hcCornerHome,2.00),  justif:`Casa precisa bater 2+ escanteios a mais`},
   ].map(m=>({...m,hasRealOdd:hasReal})).sort((a,b)=>b.score-a.score);
 }
 
@@ -449,7 +503,11 @@ export default function App(){
   const loadAnalysis=useCallback(async(fixture)=>{
     setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setTab("analise");
     try{
-      const season=selDate.getFullYear();
+      // Ligas europeias usam o ano de início da temporada (ex: 2025 para 2025/26)
+      // Brasileirão e MLS usam o ano atual
+      const calYear=selDate.getFullYear();
+      const seasonLeagues=["BSA","MLS"];
+      const season=seasonLeagues.includes(selLeague.code)?calYear:calYear-1;
       const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
       const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
@@ -457,7 +515,7 @@ export default function App(){
       const as_=parseStatsFD(ar,fixture.awayTeam.id);
       let oddsData=null;
       try{const allOdds=await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`,oddsKey);oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((fixture.homeTeam.name||"").toLowerCase().split(" ")[0])):null;}catch{}
-      setAnalysis({fixture,hs,as_,markets:buildMarkets(hs,as_,oddsData),hasOdds:!!oddsData});
+      setAnalysis({fixture,hs,as_,markets:buildMarkets(hs,as_,oddsData,selLeague.code),hasOdds:!!oddsData});
     }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);}
   },[fdKey,oddsKey,selLeague,selDate,dateStr]);
 
@@ -471,7 +529,9 @@ export default function App(){
       if(!matches.length){setScanErr("Nenhum jogo encontrado.");setScanning(false);return;}
       let allOdds=[];
       try{allOdds=await oddsFetch(`sports/${scanLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);}catch{}
-      const season=scanDate.getFullYear();
+      const calYear=scanDate.getFullYear();
+      const seasonLeagues=["BSA","MLS"];
+      const season=seasonLeagues.includes(scanLeague.code)?calYear:calYear-1;
       const results=[];
       const limit=Math.min(5,matches.length);
       for(let i=0;i<limit;i++){
@@ -484,7 +544,7 @@ export default function App(){
           const hs=parseStatsFD(hr,m.homeTeam.id);
           const as_=parseStatsFD(ar,m.awayTeam.id);
           const oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((m.homeTeam.name||"").toLowerCase().split(" ")[0])):null;
-          const markets=buildMarkets(hs,as_,oddsData);
+          const markets=buildMarkets(hs,as_,oddsData,scanLeague.code);
           const valueScore=calcValueScore(markets);
           results.push({fixture:m,hs,as_,markets,valueScore,bestMarkets:markets.filter(mk=>mk.rec==="APOSTAR"&&mk.ev>0),hasOdds:!!oddsData});
           setScanResults([...results].sort((a,b)=>b.valueScore-a.valueScore));
@@ -870,8 +930,8 @@ export default function App(){
         {/* ══ ANÁLISE IA ══ */}
         {tab==="ia"&&(
           <div>
-            <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🤖 Análise IA — GPT-4</h2>
-            <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>GPT-4 analisa os dados reais e gera relatório profissional completo.</p>
+            <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🤖 Análise IA — Claude</h2>
+            <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Claude analisa os dados reais e gera relatório profissional completo com análise de escanteios.</p>
             {!analysis?(<Card><div style={{textAlign:"center",padding:44,color:T.muted}}><div style={{fontSize:36,marginBottom:12}}>📊</div><div>Selecione um jogo em "Jogos" ou use o Scanner primeiro.</div></div></Card>):(
               <div>
                 <Card style={{marginBottom:18,padding:"14px 18px"}}>
@@ -892,7 +952,10 @@ export default function App(){
                 {loadingGpt&&<Spinner label="GPT-4 analisando... aguarde alguns segundos"/>}
                 {gptAnalysis&&(
                   <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    <Card glow><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.green,marginBottom:8}}>📋 Resumo</div><div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.resumo}</div></Card>
+                    <Card glow><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.green,marginBottom:8}}>📋 Resumo</div>
+                      {gptAnalysis.perfil_jogo&&<div style={{display:"inline-flex",alignItems:"center",gap:6,marginBottom:10,padding:"4px 12px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.25)",borderRadius:20}}><span style={{fontSize:10,color:T.muted}}>Perfil:</span><span style={{fontSize:12,fontWeight:700,color:T.blue}}>{gptAnalysis.perfil_jogo}</span></div>}
+                      <div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.resumo}</div>
+                    </Card>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                       <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.green,marginBottom:8}}>🏠 {analysis.fixture.homeTeam?.name}</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.analise_casa}</div></Card>
                       <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.blue,marginBottom:8}}>✈️ {analysis.fixture.awayTeam?.name}</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.analise_visitante}</div></Card>
@@ -903,6 +966,28 @@ export default function App(){
                         <div style={{flex:1}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>JUSTIFICATIVA</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.placar_justificativa}</div></div>
                       </div>
                     </Card>
+                    {/* Seção de Escanteios */}
+                    {gptAnalysis.escanteios_previsao&&(
+                      <Card style={{border:"1px solid rgba(78,201,240,0.25)",background:"linear-gradient(135deg,rgba(78,201,240,0.05),rgba(12,16,24,1))"}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.blue,marginBottom:12}}>🔲 Análise de Escanteios</div>
+                        <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:20,alignItems:"center"}}>
+                          <div style={{textAlign:"center",padding:"14px 20px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.2)",borderRadius:12}}>
+                            <div style={{fontSize:10,color:T.muted,marginBottom:4}}>PREVISÃO</div>
+                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:36,fontWeight:800,color:T.blue}}>{gptAnalysis.escanteios_previsao}</div>
+                            <div style={{fontSize:10,color:T.muted,marginTop:2}}>escanteios</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:10}}>{gptAnalysis.escanteios_analise}</div>
+                            {gptAnalysis.escanteios_aposta&&(
+                              <div style={{padding:"8px 14px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:9,display:"inline-flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11,color:T.muted}}>Melhor aposta:</span>
+                                <span style={{fontSize:13,fontWeight:800,color:T.green}}>{gptAnalysis.escanteios_aposta}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    )}
                     {gptAnalysis.mercados?.length>0&&(
                       <Card>
                         <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:12}}>🎯 Análise de Risco por Mercado</div>
@@ -916,11 +1001,20 @@ export default function App(){
                         </div>
                       </Card>
                     )}
-                    <Card style={{border:`1px solid ${T.borderG}`,background:"linear-gradient(135deg,rgba(56,211,159,0.05),rgba(12,16,24,1))"}}>
-                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.green,marginBottom:4}}>🏆 Aposta Principal</div>
-                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,marginBottom:8}}>{gptAnalysis.aposta_principal}</div>
-                      <div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.aposta_justificativa}</div>
-                    </Card>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                      <Card style={{border:`1px solid ${T.borderG}`,background:"linear-gradient(135deg,rgba(56,211,159,0.05),rgba(12,16,24,1))"}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.green,marginBottom:4}}>🏆 Aposta Principal</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:800,color:T.text,marginBottom:8}}>{gptAnalysis.aposta_principal}</div>
+                        <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>{gptAnalysis.aposta_justificativa}</div>
+                      </Card>
+                      {gptAnalysis.segunda_opcao&&(
+                        <Card style={{border:"1px solid rgba(78,201,240,0.25)",background:"linear-gradient(135deg,rgba(78,201,240,0.04),rgba(12,16,24,1))"}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.blue,marginBottom:4}}>🥈 Segunda Opção</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:800,color:T.text,marginBottom:8}}>{gptAnalysis.segunda_opcao}</div>
+                          <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>{gptAnalysis.segunda_opcao_justificativa}</div>
+                        </Card>
+                      )}
+                    </div>
                     {gptAnalysis.alertas?.length>0&&(<Card style={{border:"1px solid rgba(245,166,35,0.25)"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.gold,marginBottom:10}}>⚠️ Alertas</div>{gptAnalysis.alertas.map((a,i)=><div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:i<gptAnalysis.alertas.length-1?`1px solid ${T.border}`:"none"}}><span style={{color:T.gold}}>▸</span><span style={{fontSize:12,color:T.dim}}>{a}</span></div>)}</Card>)}
                     <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:8}}>💬 Conclusão</div><div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.conclusao}</div></Card>
                   </div>
