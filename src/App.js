@@ -437,6 +437,8 @@ export default function App(){
   const saveProfile=p=>{try{localStorage.setItem("bta_profile4",JSON.stringify(p))}catch{};setProfile(p);};
 
   const[tab,setTab]=useState("scanner");
+  const[jogosSubTab,setJogosSubTab]=useState("scanner");
+  const[maisSubTab,setMaisSubTab]=useState("ranking");
   const[selLeague,setSelLeague]=useState(LEAGUES[0]);
   const[selDate,setSelDate]=useState(nowDate());
   const[showCal,setShowCal]=useState(false);
@@ -688,19 +690,17 @@ export default function App(){
       <main style={{padding:"24px 24px 72px"}}>
 
         {/* ══ JOGOS (unifica Scanner + Agenda + Jogos) ══ */}
-        {(tab==="jogos"||tab==="scanner"||tab==="agenda")&&(()=>{
-          const[subTab,setSubTab]=useState(tab==="agenda"?"agenda":tab==="scanner"?"scanner":"buscar");
-          return(
+        {(tab==="jogos"||tab==="scanner"||tab==="agenda")&&(
           <div>
             {/* Sub-navegação */}
             <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
               {[["scanner","🔥","Scanner Multi-Liga"],["buscar","🔍","Buscar por Data"],["agenda","📅","Agenda Semanal"]].map(([k,ic,lb])=>(
-                <button key={k} onClick={()=>setSubTab(k)} style={{padding:"8px 16px",background:subTab===k?T.greenDim:"transparent",border:`1px solid ${subTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:subTab===k?T.green:T.muted,fontSize:12,fontWeight:subTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
+                <button key={k} onClick={()=>setJogosSubTab(k)} style={{padding:"8px 16px",background:jogosSubTab===k?T.greenDim:"transparent",border:`1px solid ${jogosSubTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:jogosSubTab===k?T.green:T.muted,fontSize:12,fontWeight:jogosSubTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
               ))}
             </div>
 
             {/* ── SUB: SCANNER ── */}
-            {subTab==="scanner"&&(
+            {jogosSubTab==="scanner"&&(
             <div>
               <div style={{marginBottom:16,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
                 <div>
@@ -848,7 +848,7 @@ export default function App(){
             )}
 
             {/* ── SUB: BUSCAR POR DATA ── */}
-            {subTab==="buscar"&&(
+            {jogosSubTab==="buscar"&&(
             <div>
               <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,margin:"0 0 16px"}}>🔍 Buscar Jogos</h2>
               <Card style={{marginBottom:18}}>
@@ -897,7 +897,7 @@ export default function App(){
             )}
 
             {/* ── SUB: AGENDA ── */}
-            {subTab==="agenda"&&(
+            {jogosSubTab==="agenda"&&(
             <div>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16}}>
                 <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,margin:0}}>📅 Agenda — Próximos 7 dias</h2>
@@ -930,7 +930,7 @@ export default function App(){
                             const kt=new Date(m.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
                             const fin=m.status==="FINISHED";
                             return(
-                              <Card key={i} style={{padding:"10px 14px",cursor:"pointer"}} onClick={()=>{setSelLeague(LEAGUES.find(l=>l.name===m.leagueName)||LEAGUES[0]);setSelDate(new Date(m.utcDate));setSubTab("buscar");}}>
+                              <Card key={i} style={{padding:"10px 14px",cursor:"pointer"}} onClick={()=>{setSelLeague(LEAGUES.find(l=>l.name===m.leagueName)||LEAGUES[0]);setSelDate(new Date(m.utcDate));setJogosSubTab("buscar");}}>
                                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                                   <div style={{minWidth:38,textAlign:"center"}}>{fin?<div style={{fontSize:9,color:T.muted}}>FIM</div>:<div style={{fontSize:12,fontWeight:700,color:T.gold}}>{kt}</div>}<div style={{fontSize:11}}>{m.leagueFlag}</div></div>
                                   <div style={{flex:1}}>
@@ -955,8 +955,7 @@ export default function App(){
             </div>
             )}
           </div>
-          );
-        })()}
+        )}
 
         {/* ══ ANÁLISE + IA ══ */}
         {(tab==="analise"||tab==="ia")&&(
@@ -1169,16 +1168,14 @@ export default function App(){
         )}
 
         {/* ══ MAIS (Ranking + Simulador + Perfil) ══ */}
-        {(tab==="mais"||tab==="ranking"||tab==="simulador"||tab==="perfil")&&(()=>{
-          const[subTab,setSubTab]=useState(tab==="simulador"?"simulador":tab==="perfil"?"perfil":"ranking");
-          return(
+        {(tab==="mais"||tab==="ranking"||tab==="simulador"||tab==="perfil")&&(
           <div>
             <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
               {[["ranking","🏆","Ranking"],["simulador","🎲","Simulador"],["perfil","👤","Perfil"]].map(([k,ic,lb])=>(
-                <button key={k} onClick={()=>setSubTab(k)} style={{padding:"8px 16px",background:subTab===k?T.greenDim:"transparent",border:`1px solid ${subTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:subTab===k?T.green:T.muted,fontSize:12,fontWeight:subTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
+                <button key={k} onClick={()=>setMaisSubTab(k)} style={{padding:"8px 16px",background:maisSubTab===k?T.greenDim:"transparent",border:`1px solid ${maisSubTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:maisSubTab===k?T.green:T.muted,fontSize:12,fontWeight:maisSubTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
               ))}
             </div>
-            {subTab==="ranking"&&(
+            {maisSubTab==="ranking"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🏆 Ranking de Mercados por Liga</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Taxa de acerto histórica por mercado em cada liga (dados 2023-2025, +300 jogos/liga)</p>
@@ -1230,7 +1227,7 @@ export default function App(){
           </div>
         )}
 
-            {subTab==="simulador"&&(
+            {maisSubTab==="simulador"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🎲 Simulador de Estratégias</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Compare sistemas de gestão de banca.</p>
@@ -1265,7 +1262,7 @@ export default function App(){
           </div>
         )}
 
-            {subTab==="perfil"&&(
+            {maisSubTab==="perfil"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>👤 Perfil</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 22px"}}>Personalize sua experiência — salvo no navegador.</p>
@@ -1303,8 +1300,7 @@ export default function App(){
         )}
 
           </div>
-          );
-        })()}
+        )}
 
       </main>
 
