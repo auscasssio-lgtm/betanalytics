@@ -452,6 +452,9 @@ export default function App(){
   const[scanErr,setScanErr]=useState("");
   const[scanLeague,setScanLeague]=useState(LEAGUES[0]);
   const[scanDate,setScanDate]=useState(nowDate());
+  const[scanMode,setScanMode]=useState("auto"); // "auto" = todas ligas, "manual" = escolher liga
+  const[scanProgress,setScanProgress]=useState({current:0,total:0,league:""});
+  const[luckyBet,setLuckyBet]=useState(null); // Chance Lucrativa
   const[alertThreshold,setAlertThreshold]=useState(()=>{try{return Number(localStorage.getItem("bta_alert")||20)}catch{return 20}});
   const[alertEnabled,setAlertEnabled]=useState(()=>{try{return localStorage.getItem("bta_alertOn")==="true"}catch{return false}});
 
@@ -535,41 +538,71 @@ export default function App(){
 
   /* ── SCANNER ── */
   const runScanner=useCallback(async()=>{
-    setScanning(true);setScanErr("");setScanResults([]);
+    setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);
+    const ds=fmtISO(scanDate);
+    const calYear=scanDate.getFullYear();
+    const calMonth=scanDate.getMonth();
+    const calendarLeagues=["BSA","MLS","CLI","CSA"];
+    const leaguesToScan=scanMode==="auto"?LEAGUES:[scanLeague];
+    const allResults=[];
+    let totalMatches=0;
+
     try{
-      const ds=fmtISO(scanDate);
-      const data=await fdFetch(`competitions/${scanLeague.code}/matches?dateFrom=${ds}&dateTo=${ds}`,fdKey);
-      const matches=data.matches||[];
-      if(!matches.length){setScanErr("Nenhum jogo encontrado.");setScanning(false);return;}
-      let allOdds=[];
-      try{allOdds=await oddsFetch(`sports/${scanLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);}catch{}
-      const calYear=scanDate.getFullYear();
-      const calMonth=scanDate.getMonth();
-      const calendarLeagues=["BSA","MLS","CLI","CSA"];
-      const season=calendarLeagues.includes(scanLeague.code)
-        ? calYear
-        : (calMonth>=7 ? calYear : calYear-1);
-      const results=[];
-      const limit=Math.min(5,matches.length);
-      for(let i=0;i<limit;i++){
-        const m=matches[i];
+      // Fase 1: busca jogos de todas as ligas
+      const leagueMatches=[];
+      for(const league of leaguesToScan){
         try{
-          const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
+          const data=await fdFetch(`competitions/${league.code}/matches?dateFrom=${ds}&dateTo=${ds}`,fdKey);
+          const matches=(data.matches||[]).slice(0,3); // max 3 por liga para não estourar rate limit
+          if(matches.length){leagueMatches.push({league,matches});totalMatches+=matches.length;}
           await sleep(6500);
-          const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
-          if(i<limit-1)await sleep(6500);
-          const hs=parseStatsFD(hr,m.homeTeam.id);
-          const as_=parseStatsFD(ar,m.awayTeam.id);
-          const oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((m.homeTeam.name||"").toLowerCase().split(" ")[0])):null;
-          const markets=buildMarkets(hs,as_,oddsData,scanLeague.code);
-          const valueScore=calcValueScore(markets);
-          results.push({fixture:m,hs,as_,markets,valueScore,bestMarkets:markets.filter(mk=>mk.rec==="APOSTAR"&&mk.ev>0),hasOdds:!!oddsData});
-          setScanResults([...results].sort((a,b)=>b.valueScore-a.valueScore));
-        }catch(e){console.warn("Scanner skip:",e.message);}
+        }catch(e){console.warn(`Skip ${league.code}:`,e.message);}
       }
-      if(!results.length)setScanErr("Não foi possível analisar. Verifique sua chave e tente novamente.");
-    }catch(e){setScanErr("Erro: "+e.message);}finally{setScanning(false);}
-  },[fdKey,oddsKey,scanLeague,scanDate]);
+
+      if(!leagueMatches.length){setScanErr("Nenhum jogo encontrado para hoje nessas ligas.");setScanning(false);return;}
+
+      // Fase 2: analisa cada jogo
+      let processed=0;
+      for(const{league,matches}of leagueMatches){
+        let allOdds=[];
+        try{allOdds=await oddsFetch(`sports/${league.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);await sleep(3000);}catch{}
+        const season=calendarLeagues.includes(league.code)?calYear:(calMonth>=7?calYear:calYear-1);
+
+        for(const m of matches){
+          try{
+            setScanProgress({current:++processed,total:totalMatches,league:league.name});
+            const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
+            await sleep(6500);
+            const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
+            await sleep(6500);
+            const hs=parseStatsFD(hr,m.homeTeam.id);
+            const as_=parseStatsFD(ar,m.awayTeam.id);
+            const oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((m.homeTeam.name||"").toLowerCase().split(" ")[0])):null;
+            const markets=buildMarkets(hs,as_,oddsData,league.code);
+            const valueScore=calcValueScore(markets);
+            allResults.push({fixture:m,hs,as_,markets,valueScore,bestMarkets:markets.filter(mk=>mk.rec==="APOSTAR"&&mk.ev>0),hasOdds:!!oddsData,league});
+            setScanResults([...allResults].sort((a,b)=>b.valueScore-a.valueScore));
+          }catch(e){console.warn("Scanner skip:",e.message);}
+        }
+      }
+
+      // Fase 3: detectar Chance Lucrativa
+      // Critério: EV positivo + odd >= 2.50 + prob >= 30% (chance real mas odd alta)
+      const luckyBets=[];
+      allResults.forEach(r=>{
+        r.markets.forEach(m=>{
+          if(m.ev>0&&m.odd>=2.50&&m.prob>=28&&m.prob<=65){
+            luckyBets.push({...m,fixture:r.fixture,league:r.league,lucroEsperado:+(m.ev*100).toFixed(1)});
+          }
+        });
+      });
+      // Ordena por maior EV absoluto (não relativo) — o que retorna mais em termos absolutos
+      luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
+      if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
+
+      if(!allResults.length)setScanErr("Não foi possível analisar os jogos. Verifique sua chave.");
+    }catch(e){setScanErr("Erro: "+e.message);}finally{setScanning(false);setScanProgress({current:0,total:0,league:""});}
+  },[fdKey,oddsKey,scanLeague,scanDate,scanMode]);
 
   /* ── AGENDA SEMANAL ── */
   const loadAgenda=useCallback(async()=>{
@@ -639,8 +672,8 @@ export default function App(){
           </div>
         </div>
         <nav style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-          {[["scanner","🔥","Scanner",hotGames.length],["agenda","📅","Agenda",0],["jogos","⚽","Jogos",0],["analise","📊","Análise",0],["ia","🤖","IA",analysis?1:0],["banca","💰","Banca",pending],["ranking","🏆","Ranking",0],["simulador","🎲","Simulador",0],["perfil","👤","Perfil",0]].map(([k,ic,lb,badge])=>
-            <NavBtn key={k} active={tab===k} onClick={()=>setTab(k)} icon={ic} label={lb} badge={badge}/>
+          {[["jogos","⚽","Jogos",0],["analise","🔬","Análise + IA",analysis?1:0],["banca","💰","Banca",pending],["ranking","🏆","Ranking",0],["mais","⚙️","Mais",0]].map(([k,ic,lb,badge])=>
+            <NavBtn key={k} active={tab===k||((tab==="scanner"||tab==="agenda"||tab==="ia"||tab==="simulador"||tab==="perfil")&&((k==="jogos"&&(tab==="scanner"||tab==="agenda"))||(k==="analise"&&tab==="ia")||(k==="mais"&&(tab==="simulador"||tab==="perfil"))))} onClick={()=>setTab(k)} icon={ic} label={lb} badge={badge}/>
           )}
         </nav>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -655,301 +688,358 @@ export default function App(){
 
       <main style={{padding:"24px 24px 72px"}}>
 
-        {/* ══ SCANNER ══ */}
-        {tab==="scanner"&&(
+        {/* ══ JOGOS (unifica Scanner + Agenda + Jogos) ══ */}
+        {(tab==="jogos"||tab==="scanner"||tab==="agenda")&&(()=>{
+          const[subTab,setSubTab]=useState(tab==="agenda"?"agenda":tab==="scanner"?"scanner":"buscar");
+          return(
           <div>
-            <div style={{marginBottom:20}}>
-              <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🔥 Scanner de Valor</h2>
-              <p style={{color:T.muted,fontSize:12,margin:0}}>Analisa todos os jogos automaticamente e destaca os com <strong style={{color:T.green}}>EV positivo real</strong>.</p>
+            {/* Sub-navegação */}
+            <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
+              {[["scanner","🔥","Scanner Multi-Liga"],["buscar","🔍","Buscar por Data"],["agenda","📅","Agenda Semanal"]].map(([k,ic,lb])=>(
+                <button key={k} onClick={()=>setSubTab(k)} style={{padding:"8px 16px",background:subTab===k?T.greenDim:"transparent",border:`1px solid ${subTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:subTab===k?T.green:T.muted,fontSize:12,fontWeight:subTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
+              ))}
             </div>
-            <Card style={{marginBottom:18}}>
-              <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-end"}}>
-                <div style={{flex:1,minWidth:280}}>
-                  <div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Liga</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {LEAGUES.map(l=><button key={l.code} onClick={()=>setScanLeague(l)} style={{padding:"7px 12px",background:scanLeague.code===l.code?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${scanLeague.code===l.code?T.borderG:T.border}`,borderRadius:8,cursor:"pointer",color:scanLeague.code===l.code?T.green:T.dim,fontSize:12,fontWeight:scanLeague.code===l.code?700:400,transition:"all 0.2s"}}>{l.flag} {l.name}</button>)}
-                  </div>
-                </div>
+
+            {/* ── SUB: SCANNER ── */}
+            {subTab==="scanner"&&(
+            <div>
+              <div style={{marginBottom:16,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
                 <div>
-                  <div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Data</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                    {[["Ontem",-1],["Hoje",0],["Amanhã",1]].map(([lb,off])=>{const d=new Date();d.setDate(d.getDate()+off);const active=fmtISO(d)===fmtISO(scanDate);return<button key={lb} onClick={()=>setScanDate(d)} style={{padding:"7px 12px",background:active?T.goldDim:"rgba(255,255,255,0.03)",border:`1px solid ${active?"rgba(245,166,35,0.35)":T.border}`,borderRadius:8,cursor:"pointer",color:active?T.gold:T.dim,fontSize:12,fontWeight:active?700:400}}>{lb}</button>;})}
-                    <button onClick={()=>setShowCal(true)} style={{padding:"7px 11px",background:"rgba(255,255,255,0.03)",border:`1px solid ${T.border}`,borderRadius:8,cursor:"pointer",color:T.dim,fontSize:11}}>📅 {fmtShort(scanDate)}</button>
-                  </div>
+                  <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🔥 Scanner de Valor</h2>
+                  <p style={{color:T.muted,fontSize:12,margin:0}}>Analisa jogos de todas as ligas e detecta as melhores oportunidades automaticamente.</p>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <label style={{fontSize:11,color:T.muted}}>Alerta EV ≥</label>
-                    <input type="number" value={alertThreshold} onChange={e=>{const v=Number(e.target.value);setAlertThreshold(v);try{localStorage.setItem("bta_alert",v)}catch{}}} style={{width:60,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 8px",color:T.text,fontSize:13,outline:"none",textAlign:"center"}}/>
-                    <button onClick={()=>{const v=!alertEnabled;setAlertEnabled(v);try{localStorage.setItem("bta_alertOn",v)}catch{}}} style={{padding:"5px 12px",background:alertEnabled?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${alertEnabled?T.borderG:T.border}`,borderRadius:7,cursor:"pointer",color:alertEnabled?T.green:T.muted,fontSize:11,fontWeight:700}}>🔔 {alertEnabled?"ON":"OFF"}</button>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{display:"flex",gap:4}}>
+                    {[["auto","🌍 Todas as ligas"],["manual","⚙️ Escolher liga"]].map(([m,lb])=>(
+                      <button key={m} onClick={()=>setScanMode(m)} style={{padding:"7px 14px",background:scanMode===m?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${scanMode===m?T.borderG:T.border}`,borderRadius:8,cursor:"pointer",color:scanMode===m?T.green:T.dim,fontSize:11,fontWeight:scanMode===m?700:400}}>{lb}</button>
+                    ))}
                   </div>
-                  <button onClick={runScanner} disabled={scanning} style={{padding:"11px 22px",background:scanning?T.card2:T.greenDim,border:`1px solid ${scanning?T.border:T.borderG}`,borderRadius:10,color:scanning?T.muted:T.green,fontSize:14,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:scanning?"not-allowed":"pointer",opacity:scanning?0.6:1}}>
-                    {scanning?"🔄 Analisando...":"🔍 Escanear Jogos"}
-                  </button>
+                  <div style={{display:"flex",gap:5}}>
+                    {[["Ontem",-1],["Hoje",0],["Amanhã",1]].map(([lb,off])=>{const d=new Date();d.setDate(d.getDate()+off);const active=fmtISO(d)===fmtISO(scanDate);return<button key={lb} onClick={()=>setScanDate(d)} style={{padding:"6px 11px",background:active?T.goldDim:"rgba(255,255,255,0.03)",border:`1px solid ${active?"rgba(245,166,35,0.35)":T.border}`,borderRadius:8,cursor:"pointer",color:active?T.gold:T.dim,fontSize:11,fontWeight:active?700:400}}>{lb}</button>;})}
+                    <button onClick={()=>setShowCal(true)} style={{padding:"6px 10px",background:"rgba(255,255,255,0.03)",border:`1px solid ${T.border}`,borderRadius:8,cursor:"pointer",color:T.dim,fontSize:10}}>📅 {fmtShort(scanDate)}</button>
+                  </div>
                 </div>
               </div>
-            </Card>
 
-            {scanErr&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{scanErr}</div>}
-            {scanning&&<Spinner label={`Analisando... ${scanResults.length>0?scanResults.length+" jogo(s) prontos. Aguarde (10 req/min no plano free)":"Buscando jogos..."}`}/>}
+              {scanMode==="manual"&&(
+                <Card style={{marginBottom:14}}>
+                  <div style={{fontSize:11,color:T.muted,marginBottom:8}}>Liga específica:</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {LEAGUES.map(l=><button key={l.code} onClick={()=>setScanLeague(l)} style={{padding:"6px 11px",background:scanLeague.code===l.code?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${scanLeague.code===l.code?T.borderG:T.border}`,borderRadius:7,cursor:"pointer",color:scanLeague.code===l.code?T.green:T.dim,fontSize:11,fontWeight:scanLeague.code===l.code?700:400}}>{l.flag} {l.name}</button>)}
+                  </div>
+                </Card>
+              )}
 
-            {!scanning&&scanResults.length>0&&(
-              <div>
-                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:T.text}}>{scanResults.length} jogos analisados · {fmtBR(scanDate)}</div>
-                  {hotGames.length>0&&<Pill color={T.green}>{hotGames.length} com valor real ≥{alertThreshold}</Pill>}
+              <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
+                <button onClick={runScanner} disabled={scanning} style={{padding:"11px 24px",background:scanning?T.card2:T.greenDim,border:`1px solid ${scanning?T.border:T.borderG}`,borderRadius:10,color:scanning?T.muted:T.green,fontSize:14,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:scanning?"not-allowed":"pointer",opacity:scanning?0.6:1}}>
+                  {scanning?"🔄 Analisando...":"🔍 Escanear Jogos"}
+                </button>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:11,color:T.muted}}>Alerta EV ≥</span>
+                  <input type="number" value={alertThreshold} onChange={e=>{const v=Number(e.target.value);setAlertThreshold(v);try{localStorage.setItem("bta_alert",v)}catch{}}} style={{width:52,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 8px",color:T.text,fontSize:12,outline:"none",textAlign:"center"}}/>
+                  <button onClick={()=>{const v=!alertEnabled;setAlertEnabled(v);try{localStorage.setItem("bta_alertOn",v)}catch{}}} style={{padding:"5px 10px",background:alertEnabled?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${alertEnabled?T.borderG:T.border}`,borderRadius:7,cursor:"pointer",color:alertEnabled?T.green:T.muted,fontSize:11,fontWeight:700}}>🔔 {alertEnabled?"ON":"OFF"}</button>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {scanResults.map((r,i)=>{
-                    const f=r.fixture;
-                    const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-                    const hasValue=r.valueScore>=alertThreshold;
-                    const isTop=i===0&&hasValue;
-                    return(
-                      <Card key={i} style={{border:`1px solid ${isTop?T.borderG:hasValue?"rgba(56,211,159,0.12)":T.border}`,background:isTop?`linear-gradient(135deg,rgba(56,211,159,0.04),${T.card})`:T.card,padding:"16px 20px"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                          <div style={{width:42,height:42,borderRadius:12,background:isTop?T.greenDim:hasValue?"rgba(56,211,159,0.05)":"rgba(255,255,255,0.03)",border:`1px solid ${isTop?T.borderG:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:isTop?22:18,flexShrink:0}}>{isTop?"🏆":hasValue?"🎯":"📉"}</div>
-                          <div style={{flex:1,minWidth:180}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
-                              {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:20}} onError={e=>e.target.style.display="none"}/>}
-                              <span style={{fontWeight:700,fontSize:14,color:T.text}}>{f.homeTeam?.name}</span>
-                              <span style={{color:T.muted,fontSize:11}}>vs</span>
-                              {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:20}} onError={e=>e.target.style.display="none"}/>}
-                              <span style={{fontWeight:700,fontSize:14,color:T.text}}>{f.awayTeam?.name}</span>
-                            </div>
-                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                              <span style={{fontSize:11,color:T.gold}}>⏰ {kt}</span>
-                              {r.hs&&<span style={{fontSize:11,color:T.muted}}>Casa: {r.hs.ppg.toFixed(2)} PPG</span>}
-                              {r.as_&&<span style={{fontSize:11,color:T.muted}}>Visit.: {r.as_.ppg.toFixed(2)} PPG</span>}
-                              {!r.hasOdds&&<Pill color={T.muted} size={9}>Odds estimadas</Pill>}
-                            </div>
-                          </div>
-                          <div style={{textAlign:"center",minWidth:70}}>
-                            <div style={{fontSize:10,color:T.muted,marginBottom:3}}>Score Valor</div>
-                            <div style={{fontSize:28,fontWeight:800,color:hasValue?T.green:T.muted,fontFamily:"'Barlow Condensed',sans-serif"}}>{r.valueScore}</div>
-                          </div>
-                          <div style={{minWidth:200}}>
-                            {r.bestMarkets.slice(0,2).map((m,j)=>(
-                              <div key={j} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 10px",background:T.greenDim,border:"1px solid rgba(56,211,159,0.2)",borderRadius:8,marginBottom:4}}>
-                                <span style={{fontSize:11,color:T.green,fontWeight:600}}>{m.name}</span>
-                                <span style={{fontSize:11,color:T.gold,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif"}}>EV +{m.ev.toFixed(2)} @{m.odd.toFixed(2)}</span>
+                {scanning&&scanProgress.total>0&&(
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:140,background:"rgba(255,255,255,0.06)",borderRadius:4,height:6,overflow:"hidden"}}>
+                      <div style={{width:`${(scanProgress.current/scanProgress.total)*100}%`,height:"100%",background:T.green,borderRadius:4,transition:"width 0.3s"}}/>
+                    </div>
+                    <span style={{fontSize:11,color:T.muted}}>{scanProgress.current}/{scanProgress.total} · {scanProgress.league}</span>
+                  </div>
+                )}
+              </div>
+
+              {scanErr&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{scanErr}</div>}
+              {scanning&&!scanProgress.total&&<Spinner label="Buscando jogos de todas as ligas..."/>}
+
+              {/* ── CHANCE LUCRATIVA ── */}
+              {luckyBet&&!scanning&&(
+                <div style={{marginBottom:20,padding:"18px 20px",background:"linear-gradient(135deg,rgba(245,166,35,0.12),rgba(12,16,24,1))",border:"2px solid rgba(245,166,35,0.4)",borderRadius:16,position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",top:12,right:16,fontSize:32,opacity:0.15}}>💎</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <span style={{fontSize:18}}>💎</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.gold}}>Chance Lucrativa do Dia</span>
+                    <Pill color={T.gold} size={10}>Alto Retorno</Pill>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,color:T.muted,marginBottom:4}}>
+                        {luckyBet.league?.flag} {luckyBet.league?.name} · {luckyBet.fixture?.homeTeam?.name} vs {luckyBet.fixture?.awayTeam?.name}
+                      </div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,marginBottom:4}}>{luckyBet.name}</div>
+                      <div style={{fontSize:12,color:T.dim}}>{luckyBet.justif}</div>
+                    </div>
+                    <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:10,color:T.muted,marginBottom:2}}>ODD</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:32,fontWeight:800,color:T.gold}}>{luckyBet.odd?.toFixed(2)}</div>
+                      </div>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:10,color:T.muted,marginBottom:2}}>PROB. REAL</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:T.green}}>{luckyBet.prob}%</div>
+                      </div>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:10,color:T.muted,marginBottom:2}}>EV</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:T.green}}>+{luckyBet.ev}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{marginTop:12,padding:"9px 14px",background:"rgba(245,166,35,0.08)",borderRadius:10,fontSize:12,color:T.gold}}>
+                    💡 <strong>Por que é lucrativa:</strong> A odd {luckyBet.odd?.toFixed(2)} implica probabilidade de {(100/luckyBet.odd).toFixed(0)}%, mas nosso modelo estima {luckyBet.prob}% de chance real — uma diferença de +{(luckyBet.prob-100/luckyBet.odd).toFixed(0)}pp que representa valor real.
+                    <span style={{color:T.muted}}> Aposte apenas o que está disposto a perder.</span>
+                  </div>
+                </div>
+              )}
+
+              {!scanning&&scanResults.length>0&&(
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:T.text}}>{scanResults.length} jogos analisados · {fmtBR(scanDate)}</div>
+                    {hotGames.length>0&&<Pill color={T.green}>{hotGames.length} com valor ≥{alertThreshold}</Pill>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {scanResults.map((r,i)=>{
+                      const f=r.fixture;
+                      const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                      const hasValue=r.valueScore>=alertThreshold;
+                      const isTop=i===0&&hasValue;
+                      return(
+                        <Card key={i} style={{border:`1px solid ${isTop?T.borderG:hasValue?"rgba(56,211,159,0.12)":T.border}`,background:isTop?`linear-gradient(135deg,rgba(56,211,159,0.04),${T.card})`:T.card,padding:"14px 18px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                            <div style={{fontSize:18,flexShrink:0}}>{r.league?.flag||"⚽"}</div>
+                            <div style={{flex:1,minWidth:160}}>
+                              <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{r.league?.name} · ⏰ {kt}</div>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:18}} onError={e=>e.target.style.display="none"}/>}
+                                <span style={{fontWeight:700,fontSize:13,color:T.text}}>{f.homeTeam?.name}</span>
+                                <span style={{color:T.muted,fontSize:11}}>vs</span>
+                                {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:18}} onError={e=>e.target.style.display="none"}/>}
+                                <span style={{fontWeight:700,fontSize:13,color:T.text}}>{f.awayTeam?.name}</span>
                               </div>
-                            ))}
-                            {!hasValue&&<div style={{fontSize:11,color:T.muted,padding:"5px 0"}}>Sem mercados com valor acima do threshold</div>}
+                              {r.bestMarkets.slice(0,2).map((m,j)=>(
+                                <div key={j} style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:5,marginRight:6,padding:"3px 9px",background:T.greenDim,border:"1px solid rgba(56,211,159,0.2)",borderRadius:6}}>
+                                  <span style={{fontSize:10,color:T.green,fontWeight:600}}>{m.name}</span>
+                                  <span style={{fontSize:10,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>@{m.odd.toFixed(2)} EV+{m.ev}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{textAlign:"center",minWidth:55}}>
+                              <div style={{fontSize:9,color:T.muted,marginBottom:2}}>Score</div>
+                              <div style={{fontSize:24,fontWeight:800,color:hasValue?T.green:T.muted,fontFamily:"'Barlow Condensed',sans-serif"}}>{r.valueScore}</div>
+                            </div>
+                            <div style={{display:"flex",gap:6,flexShrink:0}}>
+                              <button onClick={()=>{setSelFix(f);setSelLeague(r.league||LEAGUES[0]);setSelDate(scanDate);setAnalysis({fixture:f,hs:r.hs,as_:r.as_,markets:r.markets,hasOdds:r.hasOdds});setTab("analise");}} style={{padding:"7px 13px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,color:T.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📊 Analisar</button>
+                              {r.bestMarkets[0]&&<button onClick={()=>addBet(r.bestMarkets[0],null,f)} style={{padding:"7px 12px",background:T.goldDim,border:"1px solid rgba(245,166,35,0.3)",borderRadius:8,color:T.gold,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>+ Apostar</button>}
+                            </div>
                           </div>
-                          <div style={{display:"flex",gap:7,flexShrink:0}}>
-                            <button onClick={()=>{setSelFix(f);setSelLeague(scanLeague);setSelDate(scanDate);setAnalysis({fixture:f,hs:r.hs,as_:r.as_,markets:r.markets,hasOdds:r.hasOdds});setTab("analise");}} style={{padding:"8px 14px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:9,color:T.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📊 Ver</button>
-                            {r.bestMarkets[0]&&<button onClick={()=>addBet(r.bestMarkets[0],null,f)} style={{padding:"8px 14px",background:T.goldDim,border:"1px solid rgba(245,166,35,0.3)",borderRadius:9,color:T.gold,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>+ Apostar</button>}
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {!scanning&&scanResults.length===0&&!scanErr&&(
+                <div style={{textAlign:"center",padding:72,color:T.muted}}>
+                  <div style={{fontSize:48,marginBottom:16}}>🔥</div>
+                  <div style={{fontSize:15,fontWeight:600,color:T.dim,marginBottom:8}}>Pronto para escanear</div>
+                  <div style={{fontSize:12}}>{scanMode==="auto"?"Vai analisar jogos de todas as 9 ligas — pode demorar alguns minutos":"Selecione a liga e clique em Escanear"}</div>
+                </div>
+              )}
+            </div>
+            )}
+
+            {/* ── SUB: BUSCAR POR DATA ── */}
+            {subTab==="buscar"&&(
+            <div>
+              <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,margin:"0 0 16px"}}>🔍 Buscar Jogos</h2>
+              <Card style={{marginBottom:18}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+                  <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()-1);setSelDate(d);}} style={{width:32,height:32,borderRadius:8,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,color:T.text,cursor:"pointer",fontSize:18}}>‹</button>
+                  <button onClick={()=>setShowCal(true)} style={{padding:"8px 16px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:10,color:T.green,fontSize:13,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>📅 {fmtBR(selDate)}{fmtISO(selDate)===fmtISO(nowDate())&&<Pill color={T.gold} size={9}>Hoje</Pill>}</button>
+                  <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()+1);setSelDate(d);}} style={{width:32,height:32,borderRadius:8,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,color:T.text,cursor:"pointer",fontSize:18}}>›</button>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {[["Ontem",-1],["Hoje",0],["Amanhã",1],["+3d",3],["+7d",7]].map(([lb,off])=>{const d=new Date();d.setDate(d.getDate()+off);const active=fmtISO(d)===fmtISO(selDate);return<button key={lb} onClick={()=>setSelDate(d)} style={{padding:"5px 10px",background:active?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${active?T.borderG:T.border}`,borderRadius:7,color:active?T.green:T.muted,fontSize:11,fontWeight:active?700:400,cursor:"pointer"}}>{lb}</button>;})}
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Liga:</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+                  {LEAGUES.map(l=><button key={l.code} onClick={()=>setSelLeague(l)} style={{padding:"6px 12px",background:selLeague.code===l.code?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${selLeague.code===l.code?T.borderG:T.border}`,borderRadius:8,cursor:"pointer",color:selLeague.code===l.code?T.green:T.dim,fontSize:11,fontWeight:selLeague.code===l.code?700:400,transition:"all 0.2s"}}>{l.flag} {l.name}</button>)}
+                </div>
+                <button onClick={loadFixtures} disabled={loadingFix} style={{padding:"10px 24px",background:loadingFix?T.card2:T.greenDim,border:`1px solid ${loadingFix?T.border:T.borderG}`,borderRadius:10,color:loadingFix?T.muted:T.green,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingFix?"not-allowed":"pointer",opacity:loadingFix?0.6:1}}>
+                  {loadingFix?"Buscando...":`🔍 Buscar — ${fmtBR(selDate)}`}
+                </button>
+              </Card>
+              {err&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
+              {loadingFix&&<Spinner/>}
+              {!loadingFix&&fixtures.length>0&&(
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {fixtures.map((f,i)=>{
+                    const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                    const live=["IN_PLAY","LIVE","PAUSED"].includes(f.status);
+                    const fin=f.status==="FINISHED";
+                    return(
+                      <Card key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",gap:12}}>
+                        <div style={{display:"flex",alignItems:"center",gap:12,flex:1}}>
+                          <div style={{textAlign:"center",minWidth:52}}>{live&&<div style={{fontSize:10,fontWeight:800,color:T.red}}>🔴 LIVE</div>}{fin&&<div style={{fontSize:10,color:T.muted}}>FIM</div>}{!live&&!fin&&<div style={{fontSize:13,fontWeight:700,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{kt}</div>}<div style={{fontSize:9,color:T.muted,marginTop:2}}>{f.matchday?`R${f.matchday}`:""}</div></div>
+                          <div style={{display:"flex",alignItems:"center",gap:10,flex:1}}>
+                            <div style={{textAlign:"right",flex:1}}>{f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:22,display:"block",marginLeft:"auto",marginBottom:3}} onError={e=>e.target.style.display="none"}/>}<div style={{fontSize:13,fontWeight:700,color:T.text}}>{f.homeTeam?.name}</div></div>
+                            {f.score?.fullTime?.home!=null?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.gold,minWidth:52,textAlign:"center"}}>{f.score.fullTime.home}–{f.score.fullTime.away}</div>:<div style={{fontSize:12,color:T.muted,minWidth:52,textAlign:"center"}}>VS</div>}
+                            <div style={{flex:1}}>{f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:22,display:"block",marginBottom:3}} onError={e=>e.target.style.display="none"}/>}<div style={{fontSize:13,fontWeight:700,color:T.text}}>{f.awayTeam?.name}</div></div>
                           </div>
                         </div>
+                        <button onClick={()=>loadAnalysis(f)} style={{padding:"8px 16px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:9,color:T.green,fontSize:11,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>📊 Analisar</button>
                       </Card>
                     );
                   })}
                 </div>
-              </div>
-            )}
-            {!scanning&&scanResults.length===0&&!scanErr&&(
-              <div style={{textAlign:"center",padding:80,color:T.muted}}>
-                <div style={{fontSize:52,marginBottom:18}}>🔥</div>
-                <div style={{fontSize:16,fontWeight:600,color:T.dim,marginBottom:8}}>Encontre jogos com valor real</div>
-                <div style={{fontSize:13}}>Selecione uma liga e clique em "Escanear Jogos"</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ══ AGENDA SEMANAL ══ */}
-        {tab==="agenda"&&(
-          <div>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:20}}>
-              <div><h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>📅 Agenda Semanal</h2><p style={{color:T.muted,fontSize:12,margin:0}}>Próximos 7 dias das suas ligas favoritas</p></div>
-              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {LEAGUES.map(l=>{const sel=agendaLeagues.includes(l.code);return<button key={l.code} onClick={()=>setAgendaLeagues(p=>sel?p.filter(c=>c!==l.code):[...p,l.code])} style={{padding:"6px 12px",background:sel?T.blueDim:"rgba(255,255,255,0.03)",border:`1px solid ${sel?"rgba(78,201,240,0.35)":T.border}`,borderRadius:8,cursor:"pointer",color:sel?T.blue:T.dim,fontSize:11,fontWeight:sel?700:400}}>{l.flag} {l.name}</button>;})}
-                </div>
-                <button onClick={loadAgenda} disabled={loadingAgenda||!agendaLeagues.length} style={{padding:"10px 20px",background:T.blueDim,border:"1px solid rgba(78,201,240,0.35)",borderRadius:10,color:T.blue,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingAgenda?"not-allowed":"pointer",opacity:loadingAgenda?0.6:1}}>
-                  {loadingAgenda?"Carregando...":"📅 Carregar Agenda"}
-                </button>
-              </div>
+              )}
+              {!loadingFix&&fixtures.length===0&&!err&&<div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📅</div><div>Selecione uma liga e clique em "Buscar"</div></div>}
             </div>
-            {loadingAgenda&&<Spinner label="Buscando jogos dos próximos 7 dias..."/>}
-            {!loadingAgenda&&Object.keys(agendaByDay).length===0&&(
-              <div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📅</div><div>Selecione as ligas e clique em "Carregar Agenda"</div></div>
             )}
-            {!loadingAgenda&&Object.keys(agendaByDay).length>0&&(
-              <div style={{display:"flex",flexDirection:"column",gap:20}}>
-                {Object.entries(agendaByDay).map(([ds,matches])=>{
-                  const d=new Date(ds+"T12:00:00");
-                  const isToday=ds===fmtISO(nowDate());
-                  const isTomorrow=ds===fmtISO(new Date(Date.now()+86400000));
-                  return(
-                    <div key={ds}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:800,color:isToday?T.green:isTomorrow?T.gold:T.text}}>{isToday?"HOJE":isTomorrow?"AMANHÃ":d.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit"}).toUpperCase()}</div>
-                        <div style={{height:1,flex:1,background:isToday?`rgba(56,211,159,0.2)`:T.border}}/>
-                        <Pill color={isToday?T.green:isTomorrow?T.gold:T.muted} size={10}>{matches.length} jogos</Pill>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:8}}>
-                        {matches.map((m,i)=>{
-                          const kt=new Date(m.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-                          const live=["IN_PLAY","PAUSED"].includes(m.status);
-                          const fin=m.status==="FINISHED";
-                          return(
-                            <Card key={i} style={{padding:"12px 16px",cursor:"pointer"}} onClick={()=>{setSelLeague(LEAGUES.find(l=>l.name===m.leagueName)||LEAGUES[0]);setSelDate(new Date(m.utcDate));setTab("jogos");}}>
-                              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                                <div style={{minWidth:44,textAlign:"center"}}>
-                                  {live&&<div style={{fontSize:10,color:T.red,fontWeight:800}}>🔴 LIVE</div>}
-                                  {fin&&<div style={{fontSize:10,color:T.muted}}>FIM</div>}
-                                  {!live&&!fin&&<div style={{fontSize:13,fontWeight:700,color:T.gold}}>{kt}</div>}
-                                  <div style={{fontSize:9,color:T.muted,marginTop:2}}>{m.leagueFlag}</div>
-                                </div>
-                                <div style={{flex:1,display:"flex",alignItems:"center",gap:8}}>
-                                  <div style={{textAlign:"right",flex:1}}>
-                                    {m.homeTeam?.crest&&<img src={m.homeTeam.crest} alt="" style={{height:18,display:"block",marginLeft:"auto",marginBottom:2}} onError={e=>e.target.style.display="none"}/>}
-                                    <div style={{fontSize:12,fontWeight:700,color:T.text}}>{m.homeTeam?.name}</div>
-                                  </div>
-                                  {m.score?.fullTime?.home!=null?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:800,color:T.gold,minWidth:40,textAlign:"center"}}>{m.score.fullTime.home}–{m.score.fullTime.away}</div>:<div style={{fontSize:11,color:T.muted,minWidth:40,textAlign:"center"}}>vs</div>}
-                                  <div style={{flex:1}}>
-                                    {m.awayTeam?.crest&&<img src={m.awayTeam.crest} alt="" style={{height:18,display:"block",marginBottom:2}} onError={e=>e.target.style.display="none"}/>}
-                                    <div style={{fontSize:12,fontWeight:700,color:T.text}}>{m.awayTeam?.name}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* ══ JOGOS ══ */}
-        {tab==="jogos"&&(
-          <div>
-            <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>⚽ Jogos por Data</h2>
-            <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Escolha liga e data — passado, hoje ou futuro.</p>
-            <Card style={{marginBottom:20}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-                <span style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>Data:</span>
-                <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()-1);setSelDate(d);}} style={{width:32,height:32,borderRadius:8,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,color:T.text,cursor:"pointer",fontSize:18}}>‹</button>
-                <button onClick={()=>setShowCal(true)} style={{padding:"8px 16px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:10,color:T.green,fontSize:13,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>📅 {fmtBR(selDate)}{fmtISO(selDate)===fmtISO(nowDate())&&<Pill color={T.gold} size={9}>Hoje</Pill>}</button>
-                <button onClick={()=>{const d=new Date(selDate);d.setDate(d.getDate()+1);setSelDate(d);}} style={{width:32,height:32,borderRadius:8,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,color:T.text,cursor:"pointer",fontSize:18}}>›</button>
-                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {[["Ontem",-1],["Hoje",0],["Amanhã",1],["+3d",3],["+7d",7]].map(([lb,off])=>{const d=new Date();d.setDate(d.getDate()+off);const active=fmtISO(d)===fmtISO(selDate);return<button key={lb} onClick={()=>setSelDate(d)} style={{padding:"5px 10px",background:active?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${active?T.borderG:T.border}`,borderRadius:7,color:active?T.green:T.muted,fontSize:11,fontWeight:active?700:400,cursor:"pointer"}}>{lb}</button>;})}
+            {/* ── SUB: AGENDA ── */}
+            {subTab==="agenda"&&(
+            <div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16}}>
+                <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text,margin:0}}>📅 Agenda — Próximos 7 dias</h2>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {LEAGUES.map(l=>{const sel=agendaLeagues.includes(l.code);return<button key={l.code} onClick={()=>setAgendaLeagues(p=>sel?p.filter(c=>c!==l.code):[...p,l.code])} style={{padding:"5px 10px",background:sel?T.blueDim:"rgba(255,255,255,0.03)",border:`1px solid ${sel?"rgba(78,201,240,0.35)":T.border}`,borderRadius:7,cursor:"pointer",color:sel?T.blue:T.dim,fontSize:10,fontWeight:sel?700:400}}>{l.flag}</button>;})}
+                  </div>
+                  <button onClick={loadAgenda} disabled={loadingAgenda||!agendaLeagues.length} style={{padding:"8px 16px",background:T.blueDim,border:"1px solid rgba(78,201,240,0.35)",borderRadius:9,color:T.blue,fontSize:12,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingAgenda?"not-allowed":"pointer",opacity:loadingAgenda?0.6:1}}>
+                    {loadingAgenda?"Carregando...":"📅 Carregar"}
+                  </button>
                 </div>
               </div>
-              <div style={{fontSize:11,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Liga:</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:18}}>
-                {LEAGUES.map(l=><button key={l.code} onClick={()=>setSelLeague(l)} style={{padding:"7px 13px",background:selLeague.code===l.code?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${selLeague.code===l.code?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:selLeague.code===l.code?T.green:T.dim,fontSize:12,fontWeight:selLeague.code===l.code?700:400,transition:"all 0.2s"}}>{l.flag} {l.name}</button>)}
-              </div>
-              <button onClick={loadFixtures} disabled={loadingFix} style={{padding:"11px 26px",background:loadingFix?T.card2:T.greenDim,border:`1px solid ${loadingFix?T.border:T.borderG}`,borderRadius:10,color:loadingFix?T.muted:T.green,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingFix?"not-allowed":"pointer",opacity:loadingFix?0.6:1}}>
-                {loadingFix?"Buscando...":`🔍 Buscar Jogos — ${fmtBR(selDate)}`}
-              </button>
-            </Card>
-            {err&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
-            {loadingFix&&<Spinner/>}
-            {!loadingFix&&fixtures.length>0&&(
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {fixtures.map((f,i)=>{
-                  const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-                  const live=["IN_PLAY","LIVE","PAUSED"].includes(f.status);
-                  const fin=f.status==="FINISHED";
-                  return(
-                    <Card key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",gap:14}}>
-                      <div style={{display:"flex",alignItems:"center",gap:14,flex:1}}>
-                        <div style={{textAlign:"center",minWidth:58}}>{live&&<div style={{fontSize:11,fontWeight:800,color:T.red}}>🔴 LIVE</div>}{fin&&<div style={{fontSize:11,color:T.muted}}>Encerrado</div>}{!live&&!fin&&<div style={{fontSize:13,fontWeight:700,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{kt}</div>}<div style={{fontSize:10,color:T.muted,marginTop:2}}>{f.matchday?`R${f.matchday}`:""}</div></div>
-                        <div style={{display:"flex",alignItems:"center",gap:12,flex:1}}>
-                          <div style={{textAlign:"right",flex:1}}>{f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:24,display:"block",marginLeft:"auto",marginBottom:4}} onError={e=>e.target.style.display="none"}/>}<div style={{fontSize:14,fontWeight:700,color:T.text}}>{f.homeTeam?.name}</div><div style={{fontSize:10,color:T.muted}}>Casa</div></div>
-                          {f.score?.fullTime?.home!=null?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.gold,minWidth:60,textAlign:"center"}}>{f.score.fullTime.home}–{f.score.fullTime.away}</div>:<div style={{fontSize:13,color:T.muted,minWidth:60,textAlign:"center"}}>VS</div>}
-                          <div style={{flex:1}}>{f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:24,display:"block",marginBottom:4}} onError={e=>e.target.style.display="none"}/>}<div style={{fontSize:14,fontWeight:700,color:T.text}}>{f.awayTeam?.name}</div><div style={{fontSize:10,color:T.muted}}>Visit.</div></div>
+              {loadingAgenda&&<Spinner label="Buscando jogos dos próximos 7 dias..."/>}
+              {!loadingAgenda&&Object.keys(agendaByDay).length===0&&<div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📅</div><div>Selecione as ligas e clique em "Carregar"</div></div>}
+              {!loadingAgenda&&Object.keys(agendaByDay).length>0&&(
+                <div style={{display:"flex",flexDirection:"column",gap:18}}>
+                  {Object.entries(agendaByDay).map(([ds,matches])=>{
+                    const d=new Date(ds+"T12:00:00");
+                    const isToday=ds===fmtISO(nowDate());
+                    const isTomorrow=ds===fmtISO(new Date(Date.now()+86400000));
+                    return(
+                      <div key={ds}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:800,color:isToday?T.green:isTomorrow?T.gold:T.text}}>{isToday?"HOJE":isTomorrow?"AMANHÃ":d.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit"}).toUpperCase()}</div>
+                          <div style={{height:1,flex:1,background:isToday?`rgba(56,211,159,0.2)`:T.border}}/>
+                          <Pill color={isToday?T.green:isTomorrow?T.gold:T.muted} size={9}>{matches.length} jogos</Pill>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:7}}>
+                          {matches.map((m,i)=>{
+                            const kt=new Date(m.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                            const fin=m.status==="FINISHED";
+                            return(
+                              <Card key={i} style={{padding:"10px 14px",cursor:"pointer"}} onClick={()=>{setSelLeague(LEAGUES.find(l=>l.name===m.leagueName)||LEAGUES[0]);setSelDate(new Date(m.utcDate));setSubTab("buscar");}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <div style={{minWidth:38,textAlign:"center"}}>{fin?<div style={{fontSize:9,color:T.muted}}>FIM</div>:<div style={{fontSize:12,fontWeight:700,color:T.gold}}>{kt}</div>}<div style={{fontSize:11}}>{m.leagueFlag}</div></div>
+                                  <div style={{flex:1}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                      {m.homeTeam?.crest&&<img src={m.homeTeam.crest} alt="" style={{height:16}} onError={e=>e.target.style.display="none"}/>}
+                                      <span style={{fontSize:11,fontWeight:600,color:T.text}}>{m.homeTeam?.name}</span>
+                                      {m.score?.fullTime?.home!=null?<span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:800,color:T.gold,margin:"0 4px"}}>{m.score.fullTime.home}–{m.score.fullTime.away}</span>:<span style={{fontSize:10,color:T.muted,margin:"0 4px"}}>vs</span>}
+                                      {m.awayTeam?.crest&&<img src={m.awayTeam.crest} alt="" style={{height:16}} onError={e=>e.target.style.display="none"}/>}
+                                      <span style={{fontSize:11,fontWeight:600,color:T.text}}>{m.awayTeam?.name}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </Card>
+                            );
+                          })}
                         </div>
                       </div>
-                      <button onClick={()=>loadAnalysis(f)} style={{padding:"9px 18px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:10,color:T.green,fontSize:12,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>📊 Analisar</button>
-                    </Card>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             )}
-            {!loadingFix&&fixtures.length===0&&!err&&<div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📅</div><div>Selecione uma liga e clique em "Buscar Jogos"</div></div>}
           </div>
-        )}
+          );
+        })()}
 
-        {/* ══ ANÁLISE ══ */}
-        {tab==="analise"&&(
+        {/* ══ ANÁLISE + IA ══ */}
+        {(tab==="analise"||tab==="ia")&&(()=>{
+          const[subTab,setSubTab]=useState(tab==="ia"?"ia":"stats");
+          return(
           <div>
-            {loadingAna&&<Spinner label="Buscando estatísticas e odds reais... (aguarde ~15s)"/>}
-            {err&&!loadingAna&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
-            {!loadingAna&&!analysis&&!err&&<div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📊</div><div>Vá em "Jogos" e clique em "Analisar", ou use o Scanner.</div></div>}
-            {!loadingAna&&analysis&&(()=>{
-              const{fixture:f,hs,as_,markets,hasOdds}=analysis;
-              const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-              return(
-                <div>
-                  <Card glow style={{marginBottom:18}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:14}}>
-                      <div>
-                        <div style={{fontSize:10,color:T.green,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>{selLeague.flag} {selLeague.name} · {f.matchday?`R${f.matchday}`:""}{hasOdds?<Pill color={T.green} size={9}>✓ Odds reais</Pill>:<Pill color={T.gold} size={9}>Odds estimadas</Pill>}</div>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                          {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:32}} onError={e=>e.target.style.display="none"}/>}
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text}}>{f.homeTeam?.name} <span style={{color:T.muted,fontSize:16}}>vs</span> {f.awayTeam?.name}</div>
-                          {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:32}} onError={e=>e.target.style.display="none"}/>}
+            {/* Sub-nav */}
+            <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
+              {[["stats","📊","Mercados & Estatísticas"],["ia","🤖","Análise IA — Claude"]].map(([k,ic,lb])=>(
+                <button key={k} onClick={()=>setSubTab(k)} style={{padding:"8px 16px",background:subTab===k?T.greenDim:"transparent",border:`1px solid ${subTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:subTab===k?T.green:T.muted,fontSize:12,fontWeight:subTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
+              ))}
+            </div>
+
+            {/* ── SUB: MERCADOS & STATS ── */}
+            {subTab==="stats"&&(
+            <div>
+              {loadingAna&&<Spinner label="Buscando estatísticas e odds reais... (aguarde ~15s)"/>}
+              {err&&!loadingAna&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
+              {!loadingAna&&!analysis&&!err&&<div style={{textAlign:"center",padding:60,color:T.muted}}><div style={{fontSize:44,marginBottom:16}}>📊</div><div>Vá em "Jogos → Buscar" e clique em "Analisar" num jogo.</div></div>}
+              {!loadingAna&&analysis&&(()=>{
+                const{fixture:f,hs,as_,markets,hasOdds}=analysis;
+                const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                return(
+                  <div>
+                    <Card glow style={{marginBottom:18}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:14}}>
+                        <div>
+                          <div style={{fontSize:10,color:T.green,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>{selLeague.flag} {selLeague.name} · {f.matchday?`R${f.matchday}`:""}{hasOdds?<Pill color={T.green} size={9}>✓ Odds reais</Pill>:<Pill color={T.gold} size={9}>Odds estimadas</Pill>}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                            {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:30}} onError={e=>e.target.style.display="none"}/>}
+                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text}}>{f.homeTeam?.name} <span style={{color:T.muted,fontSize:16}}>vs</span> {f.awayTeam?.name}</div>
+                            {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:30}} onError={e=>e.target.style.display="none"}/>}
+                          </div>
+                          <div style={{fontSize:11,color:T.muted}}>{fmtBR(selDate)} às {kt}</div>
                         </div>
-                        <div style={{fontSize:11,color:T.muted}}>{fmtBR(selDate)} às {kt}</div>
-                      </div>
-                      {hs&&as_&&(
-                        <div style={{display:"flex",gap:20}}>
-                          {[[hs,f.homeTeam?.name,"Casa"],[as_,f.awayTeam?.name,"Visit."]].map(([s,nm,lb])=>(
+                        <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+                          {hs&&as_&&[[hs,"Casa"],[as_,"Visit."]].map(([s,lb])=>(
                             <div key={lb} style={{textAlign:"center"}}>
-                              <div style={{fontSize:10,color:T.muted,marginBottom:4}}>{lb}</div>
-                              <div style={{fontSize:22,fontWeight:800,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{s.ppg.toFixed(2)}</div>
-                              <div style={{fontSize:10,color:T.muted}}>PPG · {s.goalsFor.toFixed(1)} gols/j</div>
-                              <div style={{display:"flex",gap:3,marginTop:5,justifyContent:"center"}}>{s.form.map((r,k)=><FormBadge key={k} r={r}/>)}</div>
+                              <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{lb}</div>
+                              <div style={{fontSize:20,fontWeight:800,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{s.ppg.toFixed(2)}</div>
+                              <div style={{fontSize:9,color:T.muted}}>PPG · {s.goalsFor.toFixed(1)}g/j</div>
+                              <div style={{display:"flex",gap:2,marginTop:4,justifyContent:"center"}}>{s.form.map((r,k)=><FormBadge key={k} r={r}/>)}</div>
+                            </div>
+                          ))}
+                          <button onClick={()=>setSubTab("ia")} style={{padding:"8px 14px",background:"rgba(192,132,252,0.12)",border:"1px solid rgba(192,132,252,0.3)",borderRadius:9,color:T.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>🤖 Ver Análise IA</button>
+                        </div>
+                      </div>
+                    </Card>
+                    {hs&&as_&&(
+                      <Card style={{marginBottom:18}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:12}}>📊 Comparativo</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                          {[["Gols/J",hs.goalsFor.toFixed(2),as_.goalsFor.toFixed(2)],["Sofridos/J",hs.goalsAgainst.toFixed(2),as_.goalsAgainst.toFixed(2)],["PPG",hs.ppg.toFixed(2),as_.ppg.toFixed(2)],["Vitórias%",hs.winRateHome+"%",as_.winRateAway+"% (fora)"],["BTTS",hs.btts+"%",as_.btts+"%"],["Jogos",hs.played,as_.played]].map(([l,h,a])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 11px",background:"rgba(255,255,255,0.025)",borderRadius:8,border:`1px solid ${T.border}`}}>
+                              <span style={{fontSize:12,color:T.muted}}>{l}</span>
+                              <div style={{display:"flex",gap:10}}><span style={{fontSize:13,fontWeight:700,color:T.green}}>{h}</span><span style={{fontSize:10,color:T.muted}}>vs</span><span style={{fontSize:13,fontWeight:700,color:T.blue}}>{a}</span></div>
                             </div>
                           ))}
                         </div>
-                      )}
-                      <button onClick={()=>setTab("ia")} style={{padding:"9px 16px",background:"rgba(192,132,252,0.12)",border:"1px solid rgba(192,132,252,0.3)",borderRadius:9,color:T.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",alignSelf:"flex-start"}}>🤖 Análise IA</button>
+                      </Card>
+                    )}
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:16,color:T.text,marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
+                      🎯 Mercados
+                      <span style={{fontSize:11,color:T.blue,fontWeight:400,fontStyle:"italic"}}>clique para expandir · sugestão de valor baseada na sua banca</span>
                     </div>
-                  </Card>
-                  {hs&&as_&&(
-                    <Card style={{marginBottom:18}}>
-                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:12}}>📊 Comparativo</div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
-                        {[["Gols/J",hs.goalsFor.toFixed(2),as_.goalsFor.toFixed(2)],["Sofridos/J",hs.goalsAgainst.toFixed(2),as_.goalsAgainst.toFixed(2)],["PPG",hs.ppg.toFixed(2),as_.ppg.toFixed(2)],["Vitórias%",hs.winRateHome+"%",as_.winRateAway+"% (fora)"],["BTTS",hs.btts+"%",as_.btts+"%"],["Jogos",hs.played,as_.played]].map(([l,h,a])=>(
-                          <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 11px",background:"rgba(255,255,255,0.025)",borderRadius:8,border:`1px solid ${T.border}`}}>
-                            <span style={{fontSize:12,color:T.muted}}>{l}</span>
-                            <div style={{display:"flex",gap:10}}><span style={{fontSize:13,fontWeight:700,color:T.green}}>{h}</span><span style={{fontSize:10,color:T.muted}}>vs</span><span style={{fontSize:13,fontWeight:700,color:T.blue}}>{a}</span></div>
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  )}
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:18,color:T.text,marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
-                    🎯 Mercados
-                    <span style={{fontSize:11,color:T.blue,fontWeight:400,fontStyle:"italic"}}>clique para expandir e ver explicação + sugestão de valor</span>
+                    <div style={{display:"grid",gridTemplateColumns:"195px 1fr 85px 75px 75px 115px 36px",gap:10,padding:"0 14px 8px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
+                      {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
+                    </div>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"195px 1fr 85px 75px 75px 115px 36px",gap:10,padding:"0 14px 8px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
-                    {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                    {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
+                );
+              })()}
+            </div>
+            )}
 
-        {/* ══ ANÁLISE IA ══ */}
-        {tab==="ia"&&(
-          <div>
-            <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🤖 Análise IA — Claude</h2>
-            <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Claude analisa os dados reais e gera relatório profissional completo com análise de escanteios.</p>
-            {!analysis?(<Card><div style={{textAlign:"center",padding:44,color:T.muted}}><div style={{fontSize:36,marginBottom:12}}>📊</div><div>Selecione um jogo em "Jogos" ou use o Scanner primeiro.</div></div></Card>):(
+            {/* ── SUB: ANÁLISE IA ── */}
+            {subTab==="ia"&&(
+            <div>
+              <p style={{color:T.muted,fontSize:12,margin:"0 0 18px"}}>Claude analisa todos os dados do jogo e gera relatório profissional com recomendação personalizada.</p>
+              {!analysis?(<Card><div style={{textAlign:"center",padding:44,color:T.muted}}><div style={{fontSize:36,marginBottom:12}}>📊</div><div>Selecione um jogo em "Jogos → Buscar" primeiro.</div></div></Card>):(
               <div>
                 <Card style={{marginBottom:18,padding:"14px 18px"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
@@ -958,18 +1048,17 @@ export default function App(){
                       <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:800,color:T.text}}>{analysis.fixture.homeTeam?.name} vs {analysis.fixture.awayTeam?.name}</div>
                       {analysis.fixture.awayTeam?.crest&&<img src={analysis.fixture.awayTeam.crest} alt="" style={{height:26}} onError={e=>e.target.style.display="none"}/>}
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <button onClick={runGpt} disabled={loadingGpt} style={{padding:"10px 20px",background:loadingGpt?"rgba(255,255,255,0.04)":"rgba(192,132,252,0.15)",border:`1px solid ${loadingGpt?T.border:"rgba(192,132,252,0.4)"}`,borderRadius:10,color:loadingGpt?T.muted:T.purple,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingGpt?"not-allowed":"pointer"}}>
-                        {loadingGpt?"🔄 Analisando...":"🤖 Gerar Análise IA"}
-                      </button>
-                    </div>
+                    <button onClick={runGpt} disabled={loadingGpt} style={{padding:"10px 20px",background:loadingGpt?"rgba(255,255,255,0.04)":"rgba(192,132,252,0.15)",border:`1px solid ${loadingGpt?T.border:"rgba(192,132,252,0.4)"}`,borderRadius:10,color:loadingGpt?T.muted:T.purple,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingGpt?"not-allowed":"pointer"}}>
+                      {loadingGpt?"🔄 Analisando...":"🤖 Gerar Análise Claude"}
+                    </button>
                   </div>
                 </Card>
                 {gptErr&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{gptErr}</div>}
-                {loadingGpt&&<Spinner label="GPT-4 analisando... aguarde alguns segundos"/>}
+                {loadingGpt&&<Spinner label="Claude analisando todos os mercados... aguarde"/>}
                 {gptAnalysis&&(
                   <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    <Card glow><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.green,marginBottom:8}}>📋 Resumo</div>
+                    <Card glow>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.green,marginBottom:8}}>📋 Resumo</div>
                       {gptAnalysis.perfil_jogo&&<div style={{display:"inline-flex",alignItems:"center",gap:6,marginBottom:10,padding:"4px 12px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.25)",borderRadius:20}}><span style={{fontSize:10,color:T.muted}}>Perfil:</span><span style={{fontSize:12,fontWeight:700,color:T.blue}}>{gptAnalysis.perfil_jogo}</span></div>}
                       <div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.resumo}</div>
                     </Card>
@@ -983,24 +1072,17 @@ export default function App(){
                         <div style={{flex:1}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>JUSTIFICATIVA</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.placar_justificativa}</div></div>
                       </div>
                     </Card>
-                    {/* Seção de Escanteios */}
                     {gptAnalysis.escanteios_previsao&&(
                       <Card style={{border:"1px solid rgba(78,201,240,0.25)",background:"linear-gradient(135deg,rgba(78,201,240,0.05),rgba(12,16,24,1))"}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:T.blue,marginBottom:12}}>🔲 Análise de Escanteios</div>
-                        <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:20,alignItems:"center"}}>
-                          <div style={{textAlign:"center",padding:"14px 20px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.2)",borderRadius:12}}>
-                            <div style={{fontSize:10,color:T.muted,marginBottom:4}}>PREVISÃO</div>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:36,fontWeight:800,color:T.blue}}>{gptAnalysis.escanteios_previsao}</div>
-                            <div style={{fontSize:10,color:T.muted,marginTop:2}}>escanteios</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.blue,marginBottom:12}}>🔲 Escanteios</div>
+                        <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:16,alignItems:"center"}}>
+                          <div style={{textAlign:"center",padding:"12px 18px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.2)",borderRadius:12}}>
+                            <div style={{fontSize:10,color:T.muted,marginBottom:3}}>PREVISÃO</div>
+                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:32,fontWeight:800,color:T.blue}}>{gptAnalysis.escanteios_previsao}</div>
                           </div>
                           <div>
-                            <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:10}}>{gptAnalysis.escanteios_analise}</div>
-                            {gptAnalysis.escanteios_aposta&&(
-                              <div style={{padding:"8px 14px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:9,display:"inline-flex",alignItems:"center",gap:8}}>
-                                <span style={{fontSize:11,color:T.muted}}>Melhor aposta:</span>
-                                <span style={{fontSize:13,fontWeight:800,color:T.green}}>{gptAnalysis.escanteios_aposta}</span>
-                              </div>
-                            )}
+                            <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:8}}>{gptAnalysis.escanteios_analise}</div>
+                            {gptAnalysis.escanteios_aposta&&<div style={{padding:"7px 12px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,display:"inline-flex",gap:8}}><span style={{fontSize:11,color:T.muted}}>Melhor:</span><span style={{fontSize:12,fontWeight:700,color:T.green}}>{gptAnalysis.escanteios_aposta}</span></div>}
                           </div>
                         </div>
                       </Card>
@@ -1037,9 +1119,12 @@ export default function App(){
                   </div>
                 )}
               </div>
+              )}
+            </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* ══ BANCA ══ */}
         {tab==="banca"&&(
@@ -1103,8 +1188,17 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ RANKING MERCADOS ══ */}
-        {tab==="ranking"&&(
+        {/* ══ MAIS (Ranking + Simulador + Perfil) ══ */}
+        {(tab==="mais"||tab==="ranking"||tab==="simulador"||tab==="perfil")&&(()=>{
+          const[subTab,setSubTab]=useState(tab==="simulador"?"simulador":tab==="perfil"?"perfil":"ranking");
+          return(
+          <div>
+            <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
+              {[["ranking","🏆","Ranking"],["simulador","🎲","Simulador"],["perfil","👤","Perfil"]].map(([k,ic,lb])=>(
+                <button key={k} onClick={()=>setSubTab(k)} style={{padding:"8px 16px",background:subTab===k?T.greenDim:"transparent",border:`1px solid ${subTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:subTab===k?T.green:T.muted,fontSize:12,fontWeight:subTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
+              ))}
+            </div>
+            {subTab==="ranking"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🏆 Ranking de Mercados por Liga</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Taxa de acerto histórica por mercado em cada liga (dados 2023-2025, +300 jogos/liga)</p>
@@ -1156,8 +1250,7 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ SIMULADOR ══ */}
-        {tab==="simulador"&&(
+            {subTab==="simulador"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🎲 Simulador de Estratégias</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 20px"}}>Compare sistemas de gestão de banca.</p>
@@ -1192,8 +1285,7 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ PERFIL ══ */}
-        {tab==="perfil"&&(
+            {subTab==="perfil"&&(
           <div>
             <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>👤 Perfil</h2>
             <p style={{color:T.muted,fontSize:12,margin:"0 0 22px"}}>Personalize sua experiência — salvo no navegador.</p>
@@ -1229,6 +1321,10 @@ export default function App(){
             </div>
           </div>
         )}
+
+          </div>
+          );
+        })()}
 
       </main>
 
