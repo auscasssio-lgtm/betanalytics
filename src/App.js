@@ -439,6 +439,7 @@ export default function App(){
   const[tab,setTab]=useState("scanner");
   const[jogosSubTab,setJogosSubTab]=useState("scanner");
   const[maisSubTab,setMaisSubTab]=useState("ranking");
+  const[showRawData,setShowRawData]=useState(false);
   const[selLeague,setSelLeague]=useState(LEAGUES[0]);
   const[selDate,setSelDate]=useState(nowDate());
   const[showCal,setShowCal]=useState(false);
@@ -512,7 +513,7 @@ export default function App(){
 
   /* ── LOAD ANALYSIS ── */
   const loadAnalysis=useCallback(async(fixture)=>{
-    setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");
+    setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");setShowRawData(false);
     try{
       const calYear=selDate.getFullYear();
       const calMonth=selDate.getMonth();
@@ -960,143 +961,173 @@ export default function App(){
         {/* ══ ANÁLISE + IA ══ */}
         {(tab==="analise"||tab==="ia")&&(
           <div>
-            {/* Loading estatísticas */}
-            {loadingAna&&<Spinner label="Buscando estatísticas e odds... (aguarde ~15s)"/>}
-            {err&&!loadingAna&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
-            {!loadingAna&&!analysis&&!err&&(
-              <div style={{textAlign:"center",padding:60,color:T.muted}}>
-                <div style={{fontSize:44,marginBottom:16}}>📊</div>
-                <div style={{fontSize:15,marginBottom:8}}>Nenhum jogo selecionado</div>
-                <div style={{fontSize:12}}>Vá em "Jogos → Buscar", escolha uma liga e clique em "Analisar" num jogo.</div>
+            {/* Loading */}
+            {(loadingAna||loadingGpt)&&(
+              <div>
+                {loadingAna&&<Spinner label="Buscando estatísticas e odds reais..."/>}
+                {!loadingAna&&loadingGpt&&<Spinner label="Claude analisando o jogo e gerando recomendações..."/>}
               </div>
             )}
-            {!loadingAna&&analysis&&(()=>{
+
+            {err&&!loadingAna&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{err}</div>}
+            {gptErr&&!loadingGpt&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{gptErr} <button onClick={runGpt} style={{marginLeft:10,padding:"4px 10px",background:"rgba(255,83,112,0.15)",border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,color:T.red,fontSize:11,cursor:"pointer"}}>Tentar novamente</button></div>}
+
+            {!loadingAna&&!analysis&&!err&&(
+              <div style={{textAlign:"center",padding:72,color:T.muted}}>
+                <div style={{fontSize:52,marginBottom:16}}>🔬</div>
+                <div style={{fontSize:16,fontWeight:600,color:T.dim,marginBottom:8}}>Selecione um jogo para analisar</div>
+                <div style={{fontSize:13}}>Vá em "Jogos → Buscar" ou use o Scanner e clique em "Analisar".</div>
+              </div>
+            )}
+
+            {!loadingAna&&analysis&&!loadingGpt&&(()=>{
               const{fixture:f,hs,as_,markets,hasOdds}=analysis;
               const kt=new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
               return(
                 <div>
-                  {/* Header do jogo */}
-                  <Card glow style={{marginBottom:18}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:14}}>
+                  {/* ── HEADER COMPACTO ── */}
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:20}}>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:34}} onError={e=>e.target.style.display="none"}/>}
                       <div>
-                        <div style={{fontSize:10,color:T.green,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>{selLeague.flag} {selLeague.name} · {f.matchday?`R${f.matchday}`:""}{hasOdds?<Pill color={T.green} size={9}>✓ Odds reais</Pill>:<Pill color={T.gold} size={9}>Odds estimadas</Pill>}</div>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                          {f.homeTeam?.crest&&<img src={f.homeTeam.crest} alt="" style={{height:30}} onError={e=>e.target.style.display="none"}/>}
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text}}>{f.homeTeam?.name} <span style={{color:T.muted,fontSize:16}}>vs</span> {f.awayTeam?.name}</div>
-                          {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:30}} onError={e=>e.target.style.display="none"}/>}
-                        </div>
-                        <div style={{fontSize:11,color:T.muted}}>{fmtBR(selDate)} às {kt}</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:T.text}}>{f.homeTeam?.name} <span style={{color:T.muted,fontSize:16}}>vs</span> {f.awayTeam?.name}</div>
+                        <div style={{fontSize:11,color:T.muted,marginTop:3}}>{selLeague.flag} {selLeague.name} · {fmtBR(selDate)} às {kt} · {hasOdds?<span style={{color:T.green}}>✓ Odds reais</span>:<span style={{color:T.gold}}>Odds estimadas</span>}</div>
                       </div>
+                      {f.awayTeam?.crest&&<img src={f.awayTeam.crest} alt="" style={{height:34}} onError={e=>e.target.style.display="none"}/>}
+                    </div>
+                    {/* Botão expandir dados brutos */}
+                    <button onClick={()=>setShowRawData(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${T.border}`,borderRadius:9,cursor:"pointer",color:T.muted,fontSize:11,fontWeight:600,transition:"all 0.2s"}}>
+                      {showRawData?"▲ Ocultar dados":"▼ Ver dados brutos"}
+                    </button>
+                  </div>
+
+                  {/* ── DADOS BRUTOS (expansível) ── */}
+                  {showRawData&&(
+                    <div style={{marginBottom:24,padding:18,background:"rgba(255,255,255,0.02)",borderRadius:14,border:`1px solid ${T.border}`}}>
                       {hs&&as_&&(
-                        <div style={{display:"flex",gap:18}}>
-                          {[[hs,"Casa"],[as_,"Visit."]].map(([s,lb])=>(
-                            <div key={lb} style={{textAlign:"center"}}>
-                              <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{lb}</div>
-                              <div style={{fontSize:20,fontWeight:800,color:T.gold,fontFamily:"'Barlow Condensed',sans-serif"}}>{s.ppg.toFixed(2)}</div>
-                              <div style={{fontSize:9,color:T.muted}}>PPG · {s.goalsFor.toFixed(1)}g/j</div>
-                              <div style={{display:"flex",gap:2,marginTop:4,justifyContent:"center"}}>{s.form.map((r,k)=><FormBadge key={k} r={r}/>)}</div>
-                            </div>
-                          ))}
+                        <div style={{marginBottom:16}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Estatísticas Comparativas</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                            {[["Gols/J",hs.goalsFor.toFixed(2),as_.goalsFor.toFixed(2)],["Sofridos/J",hs.goalsAgainst.toFixed(2),as_.goalsAgainst.toFixed(2)],["PPG",hs.ppg.toFixed(2),as_.ppg.toFixed(2)],["Vitórias%",hs.winRateHome+"%",as_.winRateAway+"% (fora)"],["BTTS",hs.btts+"%",as_.btts+"%"],["Jogos",hs.played,as_.played]].map(([l,h,a])=>(
+                              <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,0.025)",borderRadius:8,border:`1px solid ${T.border}`}}>
+                                <span style={{fontSize:11,color:T.muted}}>{l}</span>
+                                <div style={{display:"flex",gap:8}}><span style={{fontSize:12,fontWeight:700,color:T.green}}>{h}</span><span style={{fontSize:10,color:T.muted}}>vs</span><span style={{fontSize:12,fontWeight:700,color:T.blue}}>{a}</span></div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
-                    </div>
-                  </Card>
-
-                  {/* Comparativo */}
-                  {hs&&as_&&(
-                    <Card style={{marginBottom:18}}>
-                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Comparativo</div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                        {[["Gols/J",hs.goalsFor.toFixed(2),as_.goalsFor.toFixed(2)],["Sofridos/J",hs.goalsAgainst.toFixed(2),as_.goalsAgainst.toFixed(2)],["PPG",hs.ppg.toFixed(2),as_.ppg.toFixed(2)],["Vitórias%",hs.winRateHome+"%",as_.winRateAway+"% (fora)"],["BTTS",hs.btts+"%",as_.btts+"%"],["Jogos",hs.played,as_.played]].map(([l,h,a])=>(
-                          <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,0.025)",borderRadius:8,border:`1px solid ${T.border}`}}>
-                            <span style={{fontSize:11,color:T.muted}}>{l}</span>
-                            <div style={{display:"flex",gap:8}}><span style={{fontSize:12,fontWeight:700,color:T.green}}>{h}</span><span style={{fontSize:10,color:T.muted}}>vs</span><span style={{fontSize:12,fontWeight:700,color:T.blue}}>{a}</span></div>
-                          </div>
-                        ))}
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>🎯 Todos os Mercados</div>
+                      <div style={{display:"grid",gridTemplateColumns:"195px 1fr 85px 75px 75px 115px 36px",gap:8,padding:"0 12px 6px",borderBottom:`1px solid ${T.border}`,marginBottom:5}}>
+                        {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
                       </div>
-                    </Card>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
+                      </div>
+                    </div>
                   )}
 
-                  {/* Mercados */}
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:16,color:T.text,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
-                    🎯 Mercados
-                    <span style={{fontSize:11,color:T.blue,fontWeight:400,fontStyle:"italic"}}>clique para expandir e ver sugestão de valor</span>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"195px 1fr 85px 75px 75px 115px 36px",gap:10,padding:"0 14px 8px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
-                    {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:24}}>
-                    {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
-                  </div>
-
-                  {/* Divisor */}
-                  <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-                    <div style={{height:1,flex:1,background:`linear-gradient(90deg,transparent,rgba(192,132,252,0.3))`}}/>
-                    <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 16px",background:"rgba(192,132,252,0.08)",border:"1px solid rgba(192,132,252,0.2)",borderRadius:20}}>
-                      <span style={{fontSize:14}}>🤖</span>
-                      <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:T.purple}}>Análise Claude</span>
+                  {/* ── ANÁLISE CLAUDE ── */}
+                  {!gptAnalysis&&!gptErr&&(
+                    <div style={{textAlign:"center",padding:40,color:T.muted}}>
+                      <div style={{fontSize:32,marginBottom:12}}>🤖</div>
+                      <div style={{fontSize:14}}>Análise Claude em andamento...</div>
                     </div>
-                    <div style={{height:1,flex:1,background:`linear-gradient(90deg,rgba(192,132,252,0.3),transparent)`}}/>
-                  </div>
+                  )}
 
-                  {/* IA carregando */}
-                  {loadingGpt&&<Spinner label="Claude analisando todos os mercados e gerando recomendações..."/>}
-                  {gptErr&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,marginBottom:16,fontSize:13}}>{gptErr} <button onClick={runGpt} style={{marginLeft:12,padding:"4px 10px",background:"rgba(255,83,112,0.15)",border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,color:T.red,fontSize:11,cursor:"pointer"}}>Tentar novamente</button></div>}
-
-                  {/* Análise IA */}
                   {gptAnalysis&&(
                     <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                      <Card glow>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.green,marginBottom:8}}>📋 Resumo</div>
-                        {gptAnalysis.perfil_jogo&&<div style={{display:"inline-flex",alignItems:"center",gap:6,marginBottom:10,padding:"4px 12px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.25)",borderRadius:20}}><span style={{fontSize:10,color:T.muted}}>Perfil:</span><span style={{fontSize:12,fontWeight:700,color:T.blue}}>{gptAnalysis.perfil_jogo}</span></div>}
-                        <div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.resumo}</div>
-                      </Card>
+
+                      {/* ── APOSTAS PRINCIPAIS — destaque máximo ── */}
+                      <div style={{display:"grid",gridTemplateColumns:gptAnalysis.segunda_opcao?"1fr 1fr":"1fr",gap:14}}>
+                        <div style={{padding:"20px 22px",background:"linear-gradient(135deg,rgba(56,211,159,0.12),rgba(12,16,24,1))",border:`2px solid ${T.borderG}`,borderRadius:16}}>
+                          <div style={{fontSize:10,color:T.green,textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>🏆 Aposta Principal</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:26,fontWeight:800,color:T.text,marginBottom:10}}>{gptAnalysis.aposta_principal}</div>
+                          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.aposta_justificativa}</div>
+                        </div>
+                        {gptAnalysis.segunda_opcao&&(
+                          <div style={{padding:"20px 22px",background:"linear-gradient(135deg,rgba(78,201,240,0.08),rgba(12,16,24,1))",border:"1px solid rgba(78,201,240,0.3)",borderRadius:16}}>
+                            <div style={{fontSize:10,color:T.blue,textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>🥈 Segunda Opção</div>
+                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:26,fontWeight:800,color:T.text,marginBottom:10}}>{gptAnalysis.segunda_opcao}</div>
+                            <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.segunda_opcao_justificativa}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── PERFIL + PLACAR ── */}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                        <Card style={{background:"linear-gradient(135deg,rgba(245,166,35,0.06),rgba(12,16,24,1))"}}>
+                          <div style={{fontSize:10,color:T.muted,marginBottom:6}}>PLACAR MAIS PROVÁVEL</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:48,fontWeight:800,color:T.gold,marginBottom:8}}>{gptAnalysis.placar_provavel}</div>
+                          <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>{gptAnalysis.placar_justificativa}</div>
+                        </Card>
+                        <Card>
+                          <div style={{fontSize:10,color:T.muted,marginBottom:8}}>PERFIL DO JOGO</div>
+                          {gptAnalysis.perfil_jogo&&<div style={{display:"inline-flex",alignItems:"center",marginBottom:12,padding:"5px 14px",background:"rgba(78,201,240,0.1)",border:"1px solid rgba(78,201,240,0.25)",borderRadius:20}}><span style={{fontSize:13,fontWeight:700,color:T.blue}}>{gptAnalysis.perfil_jogo}</span></div>}
+                          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.resumo}</div>
+                        </Card>
+                      </div>
+
+                      {/* ── ANÁLISE DOS TIMES ── */}
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                         <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.green,marginBottom:8}}>🏠 {f.homeTeam?.name}</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.analise_casa}</div></Card>
                         <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.blue,marginBottom:8}}>✈️ {f.awayTeam?.name}</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.analise_visitante}</div></Card>
                       </div>
-                      <Card style={{background:"linear-gradient(135deg,rgba(245,166,35,0.07),rgba(12,16,24,1))"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-                          <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>PLACAR MAIS PROVÁVEL</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:48,fontWeight:800,color:T.gold,letterSpacing:2}}>{gptAnalysis.placar_provavel}</div></div>
-                          <div style={{flex:1}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>JUSTIFICATIVA</div><div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{gptAnalysis.placar_justificativa}</div></div>
-                        </div>
-                      </Card>
+
+                      {/* ── ESCANTEIOS ── */}
                       {gptAnalysis.escanteios_previsao&&(
-                        <Card style={{border:"1px solid rgba(78,201,240,0.25)"}}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.blue,marginBottom:10}}>🔲 Escanteios — Previsão: <span style={{fontSize:20}}>{gptAnalysis.escanteios_previsao}</span></div>
-                          <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:8}}>{gptAnalysis.escanteios_analise}</div>
-                          {gptAnalysis.escanteios_aposta&&<div style={{padding:"7px 12px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,display:"inline-flex",gap:8,fontSize:12}}><span style={{color:T.muted}}>Melhor aposta:</span><span style={{fontWeight:700,color:T.green}}>{gptAnalysis.escanteios_aposta}</span></div>}
-                        </Card>
-                      )}
-                      {gptAnalysis.mercados?.length>0&&(
-                        <Card>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:12}}>🎯 Análise de Risco por Mercado</div>
-                          <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                            {gptAnalysis.mercados.map((m,i)=>{const rc={APOSTAR:T.green,ANALISAR:T.gold,EVITAR:T.red}[m.recomendacao]||T.muted;const riskC={Baixo:T.green,Médio:T.gold,Alto:T.red}[m.risco]||T.muted;return(
-                              <div key={i} style={{padding:"10px 13px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:`1px solid ${T.border}`}}>
-                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:13,color:T.text}}>{m.nome}</span><Pill color={rc} size={10}>{m.recomendacao}</Pill><Pill color={riskC} size={10}>Risco {m.risco}</Pill><span style={{marginLeft:"auto",fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:800,color:rc}}>{m.confianca}/10</span></div>
-                                <div style={{fontSize:12,color:T.dim,lineHeight:1.6}}>{m.justificativa}</div>
-                              </div>
-                            );})}
+                        <Card style={{border:"1px solid rgba(78,201,240,0.2)"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                            <div style={{textAlign:"center",padding:"10px 16px",background:"rgba(78,201,240,0.08)",borderRadius:10}}>
+                              <div style={{fontSize:10,color:T.muted,marginBottom:3}}>🔲 ESCANTEIOS</div>
+                              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:T.blue}}>{gptAnalysis.escanteios_previsao}</div>
+                            </div>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:13,color:T.text,lineHeight:1.7,marginBottom:8}}>{gptAnalysis.escanteios_analise}</div>
+                              {gptAnalysis.escanteios_aposta&&<div style={{padding:"6px 12px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,display:"inline-flex",gap:8,fontSize:12}}><span style={{color:T.muted}}>Melhor aposta:</span><span style={{fontWeight:700,color:T.green}}>{gptAnalysis.escanteios_aposta}</span></div>}
+                            </div>
                           </div>
                         </Card>
                       )}
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                        <Card style={{border:`1px solid ${T.borderG}`,background:"linear-gradient(135deg,rgba(56,211,159,0.05),rgba(12,16,24,1))"}}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:T.green,marginBottom:4}}>🏆 Aposta Principal</div>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:19,fontWeight:800,color:T.text,marginBottom:8}}>{gptAnalysis.aposta_principal}</div>
-                          <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>{gptAnalysis.aposta_justificativa}</div>
+
+                      {/* ── ANÁLISE DE RISCO ── */}
+                      {gptAnalysis.mercados?.length>0&&(
+                        <Card>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:12}}>🎯 Análise de Risco por Mercado</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                            {gptAnalysis.mercados.map((m,i)=>{
+                              const rc={APOSTAR:T.green,ANALISAR:T.gold,EVITAR:T.red}[m.recomendacao]||T.muted;
+                              const riskC={Baixo:T.green,Médio:T.gold,Alto:T.red}[m.risco]||T.muted;
+                              return(
+                                <div key={i} style={{padding:"10px 13px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:`1px solid ${T.border}`}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                                    <span style={{fontWeight:700,fontSize:13,color:T.text}}>{m.nome}</span>
+                                    <Pill color={rc} size={10}>{m.recomendacao}</Pill>
+                                    <Pill color={riskC} size={10}>Risco {m.risco}</Pill>
+                                    <span style={{marginLeft:"auto",fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:800,color:rc}}>{m.confianca}/10</span>
+                                  </div>
+                                  <div style={{fontSize:12,color:T.dim,lineHeight:1.6}}>{m.justificativa}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </Card>
-                        {gptAnalysis.segunda_opcao&&(
-                          <Card style={{border:"1px solid rgba(78,201,240,0.25)"}}>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:T.blue,marginBottom:4}}>🥈 Segunda Opção</div>
-                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:19,fontWeight:800,color:T.text,marginBottom:8}}>{gptAnalysis.segunda_opcao}</div>
-                            <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>{gptAnalysis.segunda_opcao_justificativa}</div>
-                          </Card>
-                        )}
-                      </div>
-                      {gptAnalysis.alertas?.length>0&&(<Card style={{border:"1px solid rgba(245,166,35,0.25)"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.gold,marginBottom:10}}>⚠️ Alertas</div>{gptAnalysis.alertas.map((a,i)=><div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:i<gptAnalysis.alertas.length-1?`1px solid ${T.border}`:"none"}}><span style={{color:T.gold}}>▸</span><span style={{fontSize:12,color:T.dim}}>{a}</span></div>)}</Card>)}
-                      <Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>💬 Conclusão</div><div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.conclusao}</div></Card>
+                      )}
+
+                      {/* ── ALERTAS + CONCLUSÃO ── */}
+                      {gptAnalysis.alertas?.length>0&&(
+                        <Card style={{border:"1px solid rgba(245,166,35,0.25)"}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.gold,marginBottom:10}}>⚠️ Alertas</div>
+                          {gptAnalysis.alertas.map((a,i)=><div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:i<gptAnalysis.alertas.length-1?`1px solid ${T.border}`:"none"}}><span style={{color:T.gold}}>▸</span><span style={{fontSize:12,color:T.dim}}>{a}</span></div>)}
+                        </Card>
+                      )}
+                      <Card style={{background:"linear-gradient(135deg,rgba(192,132,252,0.05),rgba(12,16,24,1))",border:"1px solid rgba(192,132,252,0.15)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{fontSize:16}}>🤖</span>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.purple}}>Conclusão do Claude</div>
+                        </div>
+                        <div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{gptAnalysis.conclusao}</div>
+                      </Card>
                     </div>
                   )}
                 </div>
