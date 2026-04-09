@@ -440,6 +440,7 @@ export default function App(){
   const[jogosSubTab,setJogosSubTab]=useState("scanner");
   const[maisSubTab,setMaisSubTab]=useState("ranking");
   const[showRawData,setShowRawData]=useState(false);
+  const[anaStep,setAnaStep]=useState(0); // 0=idle,1=stats,2=odds,3=ia
   const[selLeague,setSelLeague]=useState(LEAGUES[0]);
   const[selDate,setSelDate]=useState(nowDate());
   const[showCal,setShowCal]=useState(false);
@@ -513,7 +514,7 @@ export default function App(){
 
   /* ── LOAD ANALYSIS ── */
   const loadAnalysis=useCallback(async(fixture)=>{
-    setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");setShowRawData(false);
+    setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");setShowRawData(false);setAnaStep(1);
     try{
       const calYear=selDate.getFullYear();
       const calMonth=selDate.getMonth();
@@ -521,21 +522,22 @@ export default function App(){
       const season=calendarLeagues.includes(selLeague.code)?calYear:(calMonth>=7?calYear:calYear-1);
       const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
+      setAnaStep(2);
       const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       const hs=parseStatsFD(hr,fixture.homeTeam.id);
       const as_=parseStatsFD(ar,fixture.awayTeam.id);
       let oddsData=null;
       try{const allOdds=await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`,oddsKey);oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((fixture.homeTeam.name||"").toLowerCase().split(" ")[0])):null;}catch{}
+      setAnaStep(3);
       const builtMarkets=buildMarkets(hs,as_,oddsData,selLeague.code);
       setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData});
-      // Dispara análise Claude automaticamente logo após carregar os dados
       setLoadingGpt(true);
       try{
         const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate));
         setGptAnalysis(result);
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
-    }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);}
+    }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);setAnaStep(0);}
   },[fdKey,oddsKey,selLeague,selDate,dateStr]);
 
   /* ── SCANNER ── */
@@ -961,11 +963,37 @@ export default function App(){
         {/* ══ ANÁLISE + IA ══ */}
         {(tab==="analise"||tab==="ia")&&(
           <div>
-            {/* Loading */}
+            {/* Progress Bar */}
             {(loadingAna||loadingGpt)&&(
-              <div>
-                {loadingAna&&<Spinner label="Buscando estatísticas e odds reais..."/>}
-                {!loadingAna&&loadingGpt&&<Spinner label="Claude analisando o jogo e gerando recomendações..."/>}
+              <div style={{padding:"40px 24px",textAlign:"center"}}>
+                <div style={{fontSize:36,marginBottom:16}}>
+                  {anaStep===1?"📡":anaStep===2?"📊":anaStep===3?"🤖":"⏳"}
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:T.text,marginBottom:6}}>
+                  {anaStep===1?"Buscando dados do time da casa...":anaStep===2?"Buscando dados do visitante...":anaStep===3?"Claude analisando o jogo...":"Processando..."}
+                </div>
+                <div style={{fontSize:12,color:T.muted,marginBottom:20}}>
+                  {anaStep===3?"Inteligência artificial gerando recomendações personalizadas":"Consultando Football-Data.org"}
+                </div>
+                {/* Barra de progresso */}
+                <div style={{maxWidth:400,margin:"0 auto"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                    {[["1","📡","Dados Casa"],["2","📊","Dados Visit."],["3","🤖","Análise IA"],["4","✅","Pronto"]].map(([step,icon,label])=>{
+                      const s=Number(step);
+                      const done=anaStep>s||(s===4&&!loadingAna&&!loadingGpt);
+                      const active=anaStep===s||(s===4&&loadingGpt);
+                      return(
+                        <div key={step} style={{textAlign:"center",flex:1}}>
+                          <div style={{width:36,height:36,borderRadius:"50%",margin:"0 auto 4px",display:"flex",alignItems:"center",justifyContent:"center",background:done?T.greenDim:active?"rgba(56,211,159,0.2)":"rgba(255,255,255,0.04)",border:`2px solid ${done||active?T.borderG:T.border}`,fontSize:16,transition:"all 0.4s"}}>{done?"✓":icon}</div>
+                          <div style={{fontSize:9,color:done||active?T.green:T.muted,fontWeight:done||active?700:400}}>{label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.06)",borderRadius:4,height:5,overflow:"hidden",marginTop:4}}>
+                    <div style={{width:`${anaStep===1?15:anaStep===2?40:anaStep===3?75:100}%`,height:"100%",background:`linear-gradient(90deg,${T.green},rgba(56,211,159,0.6))`,borderRadius:4,transition:"width 0.6s ease",boxShadow:`0 0 8px ${T.green}44`}}/>
+                  </div>
+                </div>
               </div>
             )}
 
