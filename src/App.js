@@ -80,48 +80,71 @@ const fmtISO=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"
 const fmtBR=d=>d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
 const fmtShort=d=>d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
 const nowDate=()=>new Date();
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(let i=0;i<f.getDay();i++)days.push(null);for(let d=1;d<=l.getDate();d++)days.push(new Date(y,m,d));return days;}
 
 /* ═══════════════════════════════════════════ API
-   Usa rotas serverless do Vercel — sem proxy local necessário
-   Em desenvolvimento local, usa localhost:3000/api/...
+   Chamadas diretas do navegador — sem proxy necessário
+   Football-Data.org tem CORS aberto para browsers
 ═══════════════════════════════════════════ */
-const API_BASE = "";  // vazio = mesmo domínio (funciona local e no Vercel)
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fdFetch(ep, key, retries = 2) {
-  const r = await fetch(`${API_BASE}/api/fd?endpoint=${encodeURIComponent(ep)}`, {
-    headers: { "X-Auth-Token": key },
+  const r = await fetch(`https://api.football-data.org/v4/${ep}`, {
+    headers: { "X-Auth-Token": key, "X-Unfold-Goals": "false" },
   });
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(t.includes("<") ? "Servidor não disponível. Tente novamente." : `FD ${r.status}: ${t.slice(0, 120)}`);
+    throw new Error(`FD ${r.status}: ${t.slice(0, 120)}`);
   }
   return r.json();
 }
 
 async function oddsFetch(path, key) {
-  const [endpoint, query] = path.includes("?") ? path.split("?") : [path, ""];
-  const params = new URLSearchParams(query);
-  params.set("apiKey", key);
-  const r = await fetch(`${API_BASE}/api/odds?endpoint=${encodeURIComponent(endpoint)}&${params}`);
+  const sep = path.includes("?") ? "&" : "?";
+  const r = await fetch(`https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`);
   if (!r.ok) throw new Error(`Odds ${r.status}`);
   return r.json();
 }
 
-async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr) {
-  const r = await fetch(`${API_BASE}/api/ia`, {
+async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, anthropicKey) {
+  const top = (markets || []).filter(m => m.rec === "APOSTAR" && m.cat !== "Escanteios").slice(0, 3);
+  const cornerMarkets = (markets || []).filter(m => m.cat === "Escanteios").slice(0, 3);
+  const fmtM = m => `• ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | ${m.justif}`;
+
+  const prompt = `Você é analista sênior de apostas. Analise ESTA partida e responda APENAS JSON válido.
+
+PARTIDA: ${fixture.homeTeam?.name} x ${fixture.awayTeam?.name} | ${leagueName} | ${dateStr}
+CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}% | Forma: ${homeStats?.form?.join(" ")||"N/D"}
+VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}% | Forma: ${awayStats?.form?.join(" ")||"N/D"}
+MERCADOS EV+: ${top.map(fmtM).join("\n")||"Nenhum"}
+ESCANTEIOS: ${cornerMarkets.map(fmtM).join("\n")||"N/D"}
+INSTRUÇÃO: NÃO repita sempre os mesmos mercados. Escolha baseado nos dados DESTE jogo.
+
+{"resumo":"2-3 frases","analise_casa":"análise","analise_visitante":"análise","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/etc","placar_provavel":"X-Y","placar_justificativa":"1-2 frases","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR","risco":"Baixo","justificativa":"para este jogo","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"2-3 frases","segunda_opcao":"nome","segunda_opcao_justificativa":"1-2 frases","alertas":["alerta"],"conclusao":"conselho final"}`;
+
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fixture, homeStats, awayStats, markets, leagueName, dateStr }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 2500,
+      messages: [
+        { role: "user", content: prompt },
+        { role: "assistant", content: "{" }
+      ],
+    }),
   });
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(t.slice(0, 200));
-  }
-  return r.json();
+  if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 200)); }
+  const data = await r.json();
+  const text = data.content?.[0]?.text || "";
+  return JSON.parse(("{" + text).replace(/```json|```/g, "").trim());
 }
 
 /* ═══════════════════════════════════════════ ANALYSIS ENGINE */
@@ -397,7 +420,7 @@ function MarketCard({m,i,onRegister,bankroll,currency,strategy}){
 
 /* ═══════════════════════════════════════════ SETUP */
 function Setup({onSave}){
-  const[fd,setFd]=useState("");const[odds,setOdds]=useState("");
+  const[fd,setFd]=useState("");const[odds,setOdds]=useState("");const[ant,setAnt]=useState("");
   const ok=fd.trim()&&odds.trim();
   return(
     <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow',sans-serif"}}>
@@ -408,7 +431,7 @@ function Setup({onSave}){
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:38,fontWeight:800,color:T.text,letterSpacing:1}}>BETANALYTICS</div>
           <div style={{fontSize:13,color:T.muted,marginTop:8}}>Dashboard profissional · Dados reais · Temporada atual</div>
         </div>
-        {[{label:"Football-Data.org",desc:"Jogos, stats, escudos · gratuito",color:T.green,link:"https://football-data.org/client/register",val:fd,set:setFd,ph:"Chave Football-Data.org..."},{label:"The Odds API",desc:"Odds reais das casas · 500 req/mês grátis",color:T.gold,link:"https://the-odds-api.com/#get-access",val:odds,set:setOdds,ph:"Chave The Odds API..."}].map(({label,desc,color,link,val,set,ph})=>(
+        {[{label:"Football-Data.org",desc:"Jogos, stats, escudos · gratuito",color:T.green,link:"https://football-data.org/client/register",val:fd,set:setFd,ph:"Chave Football-Data.org..."},{label:"The Odds API",desc:"Odds reais das casas · 500 req/mês grátis",color:T.gold,link:"https://the-odds-api.com/#get-access",val:odds,set:setOdds,ph:"Chave The Odds API..."},{label:"Anthropic API",desc:"Análise IA com Claude · ~$0.001/análise",color:T.purple,link:"https://console.anthropic.com",val:ant,set:setAnt,ph:"Chave Anthropic (sk-ant-...) — opcional"}].map(({label,desc,color,link,val,set,ph})=>(
           <Card key={label} style={{marginBottom:14}} glow={!!val}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
               <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color}}>{label}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{desc}</div></div>
@@ -417,7 +440,7 @@ function Setup({onSave}){
             <input type="password" placeholder={ph} value={val} onChange={e=>set(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,0.04)",border:`1px solid ${val?"rgba(56,211,159,0.3)":T.border}`,borderRadius:10,padding:"13px 15px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
           </Card>
         ))}
-        <button onClick={()=>ok&&onSave(fd.trim(),odds.trim())} disabled={!ok} style={{width:"100%",background:ok?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${ok?T.borderG:T.border}`,borderRadius:12,padding:15,color:ok?T.green:T.muted,fontSize:16,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:ok?"pointer":"not-allowed",transition:"all 0.2s",marginBottom:12}}>
+        <button onClick={()=>ok&&onSave(fd.trim(),odds.trim(),ant.trim())} disabled={!ok} style={{width:"100%",background:ok?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${ok?T.borderG:T.border}`,borderRadius:12,padding:15,color:ok?T.green:T.muted,fontSize:16,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:ok?"pointer":"not-allowed",transition:"all 0.2s",marginBottom:12}}>
           Entrar no Dashboard →
         </button>
         <div style={{padding:"11px 15px",background:T.redDim,border:"1px solid rgba(255,83,112,0.2)",borderRadius:10,fontSize:11,color:T.red}}>🔒 Suas chaves ficam salvas <strong>apenas no seu navegador</strong>. Nunca as compartilhe.</div>
@@ -430,7 +453,11 @@ function Setup({onSave}){
 export default function App(){
   const[fdKey,setFdKey]=useState(()=>{try{return localStorage.getItem("bta_fd3")||""}catch{return ""}});
   const[oddsKey,setOddsKey]=useState(()=>{try{return localStorage.getItem("bta_od3")||""}catch{return ""}});
-  const saveKeys=(fd,od)=>{try{localStorage.setItem("bta_fd3",fd);localStorage.setItem("bta_od3",od);}catch{};setFdKey(fd);setOddsKey(od);};
+  const[gptKey,setGptKey]=useState(()=>{try{return localStorage.getItem("bta_gpt")||""}catch{return ""}});
+  const saveKeys=(fd,od,ant="")=>{
+    try{localStorage.setItem("bta_fd3",fd);localStorage.setItem("bta_od3",od);if(ant)localStorage.setItem("bta_gpt",ant);}catch{}
+    setFdKey(fd);setOddsKey(od);if(ant)setGptKey(ant);
+  };
   const logout=()=>{try{["bta_fd3","bta_od3"].forEach(k=>localStorage.removeItem(k));}catch{};setFdKey("");setOddsKey("");};
 
   const[profile,setProfile]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_profile4")||"{}")}catch{return{}}});
@@ -472,7 +499,6 @@ export default function App(){
   const[simFib,setSimFib]=useState(0);
   const[simLoss,setSimLoss]=useState(0);
 
-  const[gptKey,setGptKey]=useState(()=>{try{return localStorage.getItem("bta_gpt")||""}catch{return ""}});
   const[gptAnalysis,setGptAnalysis]=useState(null);
   const[loadingGpt,setLoadingGpt]=useState(false);
   const[gptErr,setGptErr]=useState("");
@@ -533,7 +559,7 @@ export default function App(){
       setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData});
       setLoadingGpt(true);
       try{
-        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate));
+        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),gptKey);
         setGptAnalysis(result);
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
@@ -645,7 +671,7 @@ export default function App(){
     setLoadingGpt(true);setGptErr("");setGptAnalysis(null);
     const{fixture:f,hs,as_,markets}=analysis;
     try{
-      const result=await claudeAnalysis(f,hs,as_,markets,selLeague.name,fmtBR(selDate));
+      const result=await claudeAnalysis(f,hs,as_,markets,selLeague.name,fmtBR(selDate),gptKey);
       setGptAnalysis(result);
     }catch(e){setGptErr("Erro IA: "+e.message);}
     finally{setLoadingGpt(false);}
@@ -1355,6 +1381,14 @@ export default function App(){
                 {profile.favTeamCrest&&<div style={{marginTop:14,display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:T.purpleDim,border:"1px solid rgba(192,132,252,0.25)",borderRadius:12}}><img src={profile.favTeamCrest} alt="" style={{height:44}} onError={e=>e.target.style.display="none"}/><div><div style={{fontWeight:700,color:T.purple,fontSize:14}}>{profile.favTeam||"Seu time"}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>Aparece no cabeçalho</div></div></div>}
               </Card>
             </div>
+            {/* Chave Anthropic no perfil */}
+            <Card style={{marginTop:16,border:`1px solid rgba(192,132,252,0.2)`}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:16,color:T.purple,marginBottom:12}}>🤖 Chave API Anthropic (Claude)</div>
+              <div style={{fontSize:12,color:T.muted,marginBottom:10}}>Necessária para a análise IA automática. Obtida em <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{color:T.blue}}>console.anthropic.com</a> → API Keys.</div>
+              <input type="password" placeholder="sk-ant-..." value={gptKey} onChange={e=>{setGptKey(e.target.value);try{localStorage.setItem("bta_gpt",e.target.value)}catch{}}} style={{width:"100%",background:"rgba(255,255,255,0.05)",border:`1px solid ${gptKey?"rgba(192,132,252,0.4)":T.border}`,borderRadius:10,padding:"11px 13px",color:T.text,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              {gptKey&&<div style={{fontSize:11,color:T.green,marginTop:8}}>✓ Chave configurada — análise IA ativa</div>}
+              {!gptKey&&<div style={{fontSize:11,color:T.gold,marginTop:8}}>⚠️ Sem chave — análise IA indisponível</div>}
+            </Card>
           </div>
         )}
 
