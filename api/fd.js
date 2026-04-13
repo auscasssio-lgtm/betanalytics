@@ -1,25 +1,20 @@
-// api/fd.js — Proxy para Football-Data.org
-module.exports = async function handler(req, res) {
+module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Auth-Token");
   if (req.method === "OPTIONS") return res.status(204).end();
 
   const { endpoint } = req.query;
-  if (!endpoint) return res.status(400).json({ error: "Parâmetro 'endpoint' obrigatório" });
+  if (!endpoint) return res.status(400).json({ error: "endpoint obrigatorio" });
 
-  const authToken = req.headers["x-auth-token"];
-  if (!authToken) return res.status(401).json({ error: "Header X-Auth-Token obrigatório" });
+  const key = req.headers["x-auth-token"];
+  if (!key) return res.status(401).json({ error: "X-Auth-Token obrigatorio" });
 
-  try {
-    const response = await fetch(`https://api.football-data.org/v4/${endpoint}`, {
-      headers: { "X-Auth-Token": authToken, "User-Agent": "BetAnalytics/1.0" },
-    });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json(data);
-    res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate");
-    return res.status(200).json(data);
-  } catch (error) {
-    return res.status(502).json({ error: "Erro Football-Data.org: " + error.message });
-  }
+  const url = `https://api.football-data.org/v4/${endpoint}`;
+  const upstream = await fetch(url, {
+    headers: { "X-Auth-Token": key }
+  });
+  const data = await upstream.json();
+  res.setHeader("Cache-Control", "s-maxage=60");
+  return res.status(upstream.status).json(data);
 };
