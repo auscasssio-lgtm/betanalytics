@@ -89,23 +89,23 @@ function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(le
 ═══════════════════════════════════════════ */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Detecta se está no Vercel (produção) ou local
-const IS_VERCEL = typeof window !== "undefined" && window.location.hostname !== "localhost";
-const FD_BASE = IS_VERCEL
-  ? "/api/fd?endpoint="   // usa serverless function no Vercel
-  : "https://corsproxy.io/?url=https://api.football-data.org/v4/"; // direto local
+// Sempre usa serverless no Vercel, direto em localhost
+const IS_LOCAL = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
 async function fdFetch(ep, key, retries = 2) {
   let r;
-  if (IS_VERCEL) {
-    r = await fetch(`/api/fd?endpoint=${encodeURIComponent(ep)}`, {
-      headers: { "X-Auth-Token": key },
-    });
-  } else {
-    r = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(`https://api.football-data.org/v4/${ep}`)}`, {
-      headers: { "X-Auth-Token": key },
-    });
-  }
+  try {
+    if (IS_LOCAL) {
+      r = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(`https://api.football-data.org/v4/${ep}`)}`, {
+        headers: { "X-Auth-Token": key },
+      });
+    } else {
+      // Separa o path dos query params para evitar que & quebre a query string do proxy
+      const [path, qs] = ep.includes("?") ? ep.split("?") : [ep, ""];
+      const proxyUrl = `/api/fd?endpoint=${encodeURIComponent(path)}${qs ? "&" + qs : ""}`;
+      r = await fetch(proxyUrl, { headers: { "X-Auth-Token": key } });
+    }
+  } catch(e) { throw new Error("Erro de rede: " + e.message); }
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
   if (!r.ok) {
     const t = await r.text().catch(() => "");
@@ -115,14 +115,17 @@ async function fdFetch(ep, key, retries = 2) {
 }
 
 async function oddsFetch(path, key) {
+  const [endpoint, query] = path.includes("?") ? path.split("?") : [path, ""];
+  const params = new URLSearchParams(query);
+  params.set("apiKey", key);
   let r;
-  if (IS_VERCEL) {
-    const sep = path.includes("?") ? "&" : "?";
-    r = await fetch(`/api/odds?endpoint=${encodeURIComponent(path.split("?")[0])}&${path.split("?")[1]||""}&apiKey=${key}`);
-  } else {
-    const sep = path.includes("?") ? "&" : "?";
-    r = await fetch(`https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`);
-  }
+  try {
+    if (IS_LOCAL) {
+      r = await fetch(`https://api.the-odds-api.com/v4/${path}&apiKey=${key}`);
+    } else {
+      r = await fetch(`/api/odds?endpoint=${encodeURIComponent(endpoint)}&${params.toString()}`);
+    }
+  } catch(e) { throw new Error("Odds erro: " + e.message); }
   if (!r.ok) throw new Error(`Odds ${r.status}`);
   return r.json();
 }
