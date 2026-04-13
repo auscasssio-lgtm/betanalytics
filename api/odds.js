@@ -1,5 +1,5 @@
 // api/odds.js — Proxy para The Odds API
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -20,4 +20,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(502).json({ error: "Erro Odds API: " + error.message });
   }
-}
+};
