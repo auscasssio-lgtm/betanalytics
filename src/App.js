@@ -89,21 +89,40 @@ function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(le
 ═══════════════════════════════════════════ */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Detecta se está no Vercel (produção) ou local
+const IS_VERCEL = typeof window !== "undefined" && window.location.hostname !== "localhost";
+const FD_BASE = IS_VERCEL
+  ? "/api/fd?endpoint="   // usa serverless function no Vercel
+  : "https://corsproxy.io/?url=https://api.football-data.org/v4/"; // direto local
+
 async function fdFetch(ep, key, retries = 2) {
-  const r = await fetch(`https://api.football-data.org/v4/${ep}`, {
-    headers: { "X-Auth-Token": key, "X-Unfold-Goals": "false" },
-  });
+  let r;
+  if (IS_VERCEL) {
+    r = await fetch(`/api/fd?endpoint=${encodeURIComponent(ep)}`, {
+      headers: { "X-Auth-Token": key },
+    });
+  } else {
+    r = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(`https://api.football-data.org/v4/${ep}`)}`, {
+      headers: { "X-Auth-Token": key },
+    });
+  }
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
   if (!r.ok) {
-    const t = await r.text();
+    const t = await r.text().catch(() => "");
     throw new Error(`FD ${r.status}: ${t.slice(0, 120)}`);
   }
   return r.json();
 }
 
 async function oddsFetch(path, key) {
-  const sep = path.includes("?") ? "&" : "?";
-  const r = await fetch(`https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`);
+  let r;
+  if (IS_VERCEL) {
+    const sep = path.includes("?") ? "&" : "?";
+    r = await fetch(`/api/odds?endpoint=${encodeURIComponent(path.split("?")[0])}&${path.split("?")[1]||""}&apiKey=${key}`);
+  } else {
+    const sep = path.includes("?") ? "&" : "?";
+    r = await fetch(`https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`);
+  }
   if (!r.ok) throw new Error(`Odds ${r.status}`);
   return r.json();
 }
@@ -300,7 +319,7 @@ function Calendar({selected,onSelect,onClose}){
 }
 
 /* ═══════════════════════════════════════════ MARKET CARD (expansível) */
-function MarketCard({m,i,onRegister,bankroll,currency,strategy}){
+function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,isInCombinada=false}){
   const[open,setOpen]=useState(false);
   const[customStake,setCustomStake]=useState(null); // null = usar sugestão
   const rs=RS[m.rec];
@@ -409,6 +428,11 @@ function MarketCard({m,i,onRegister,bankroll,currency,strategy}){
                   + Registrar Aposta · {currency.symbol} {finalStake.toFixed(2)}
                 </button>
               )}
+              {onAddCombinada&&m.ev>0&&(
+                <button onClick={e=>{e.stopPropagation();onAddCombinada(m);}} style={{width:"100%",marginTop:6,padding:"9px 0",background:isInCombinada?"rgba(245,166,35,0.15)":T.goldDim,border:`1px solid ${isInCombinada?"rgba(245,166,35,0.5)":"rgba(245,166,35,0.3)"}`,borderRadius:9,color:T.gold,fontSize:12,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer"}}>
+                  {isInCombinada?"✓ Na Combinada":"🎰 Adicionar à Combinada"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -491,6 +515,16 @@ export default function App(){
 
   const[betLog,setBetLog]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_bets4")||"[]")}catch{return[]}});
   const saveBets=b=>{try{localStorage.setItem("bta_bets4",JSON.stringify(b))}catch{};setBetLog(b);};
+
+  // Apostas Combinadas
+  const[combinadas,setCombinadas]=useState([]); // seleções para combinar
+  const[combLog,setCombLog]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_comb")||"[]")}catch{return[]}});
+  const saveCombLog=b=>{try{localStorage.setItem("bta_comb",JSON.stringify(b))}catch{};setCombLog(b);};
+
+  // Gestão de banca profissional
+  const[bancaConfig,setBancaConfig]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_bancacfg")||"{}")}catch{return{}}});
+  const saveBancaConfig=c=>{try{localStorage.setItem("bta_bancacfg",JSON.stringify(c))}catch{};setBancaConfig(c);};
+  const[bancaSubTab,setBancaSubTab]=useState("resumo");
 
   const[simStrat,setSimStrat]=useState("kelly");
   const[simOdd,setSimOdd]=useState(1.90);
@@ -702,7 +736,7 @@ export default function App(){
           </div>
         </div>
         <nav style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-          {[["jogos","⚽","Jogos",0],["analise","🔬","Análise + IA",analysis?1:0],["banca","💰","Banca",pending],["ranking","🏆","Ranking",0],["mais","⚙️","Mais",0]].map(([k,ic,lb,badge])=>
+          {[["jogos","⚽","Jogos",0],["analise","🔬","Análise + IA",analysis?1:0],["combinadas","🎰","Combinadas",combinadas.length],["banca","💰","Banca",pending],["ranking","🏆","Ranking",0],["mais","⚙️","Mais",0]].map(([k,ic,lb,badge])=>
             <NavBtn key={k} active={tab===k||((tab==="scanner"||tab==="agenda"||tab==="ia"||tab==="simulador"||tab==="perfil")&&((k==="jogos"&&(tab==="scanner"||tab==="agenda"))||(k==="analise"&&tab==="ia")||(k==="mais"&&(tab==="simulador"||tab==="perfil"))))} onClick={()=>setTab(k)} icon={ic} label={lb} badge={badge}/>
           )}
         </nav>
@@ -1076,7 +1110,7 @@ export default function App(){
                         {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
+                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} onAddCombinada={(mk)=>setCombinadas(prev=>{const exists=prev.find(c=>c.marketId===`${f.homeTeam?.id}-${mk.name}`);if(exists)return prev.filter(c=>c.marketId!==`${f.homeTeam?.id}-${mk.name}`);return[...prev,{marketId:`${f.homeTeam?.id}-${mk.name}`,match:`${f.homeTeam?.name} x ${f.awayTeam?.name}`,market:mk.name,odd:mk.odd,prob:mk.prob,ev:mk.ev,league:selLeague.name,leagueFlag:selLeague.flag}];})} isInCombinada={!!combinadas.find(c=>c.marketId===`${f.homeTeam?.id}-${m.name}`)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
                       </div>
                     </div>
                   )}
@@ -1190,48 +1224,367 @@ export default function App(){
           </div>
         )}
 
+        {/* ══ COMBINADAS ══ */}
+        {tab==="combinadas"&&(()=>{
+          const combOdd=combinadas.reduce((acc,c)=>acc*c.odd,1);
+          const combProb=combinadas.reduce((acc,c)=>acc*(c.prob/100),1)*100;
+          const combEV=(combProb/100)*combOdd-1;
+          const sugStake=Math.max(0,(combProb/100*(combOdd-1)-(1-combProb/100))/(combOdd-1));
+          const sugVal=+(bankroll*Math.min(sugStake,0.03)).toFixed(2);
+          const[loadingComb,setLoadingComb]=useState(false);
+          const[combAnalysis,setCombAnalysis]=useState(null);
+          const[combErr,setCombErr]=useState("");
+
+          const analisarCombinada=async()=>{
+            if(!gptKey){setCombErr("Configure a chave Anthropic em Mais → Perfil.");return;}
+            if(combinadas.length<2){setCombErr("Adicione pelo menos 2 seleções.");return;}
+            setLoadingComb(true);setCombErr("");setCombAnalysis(null);
+            const sels=combinadas.map(c=>`• ${c.match} — ${c.market} @ ${c.odd?.toFixed(2)} (Prob ${c.prob}%, EV ${c.ev>0?"+":""}${c.ev})`).join("\n");
+            const prompt=`Você é analista profissional de apostas. Analise esta aposta combinada e responda APENAS JSON válido.
+
+SELEÇÕES (${combinadas.length} jogos):
+${sels}
+
+ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% | EV COMBINADO: ${combEV>0?"+":""}${combEV.toFixed(3)}
+
+{"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-2%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto"}`;
+            try{
+              const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":gptKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content:prompt},{role:"assistant",content:"{"}]})});
+              const data=await r.json();
+              const text=data.content?.[0]?.text||"";
+              setCombAnalysis(JSON.parse(("{"+text).replace(/```json|```/g,"").trim()));
+            }catch(e){setCombErr("Erro IA: "+e.message);}
+            finally{setLoadingComb(false);}
+          };
+
+          const registrarCombinada=()=>{
+            if(!combinadas.length)return;
+            const nova={id:Date.now(),selecoes:combinadas,odd:combOdd,prob:combProb,ev:combEV,stake:sugVal,result:"PENDENTE",date:fmtISO(nowDate())};
+            const updated=[nova,...combLog];
+            saveCombLog(updated);
+            setCombinadas([]);
+          };
+
+          return(
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+              <div>
+                <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 4px"}}>🎰 Apostas Combinadas</h2>
+                <p style={{color:T.muted,fontSize:12,margin:0}}>Combine múltiplos jogos — o Claude analisa a viabilidade da combinada.</p>
+              </div>
+              {combinadas.length>=2&&<button onClick={registrarCombinada} style={{padding:"10px 20px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:10,color:T.green,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer"}}>✅ Registrar Combinada</button>}
+            </div>
+
+            {/* Seleções atuais */}
+            {combinadas.length===0?(
+              <Card style={{textAlign:"center",padding:52}}>
+                <div style={{fontSize:44,marginBottom:14}}>🎰</div>
+                <div style={{fontSize:15,fontWeight:600,color:T.dim,marginBottom:8}}>Nenhuma seleção adicionada</div>
+                <div style={{fontSize:12,color:T.muted}}>Vá em "Análise + IA", expanda um mercado com EV positivo e clique em "Adicionar à Combinada".</div>
+              </Card>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                {/* Resumo da combinada */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+                  {[{l:"Seleções",v:combinadas.length,c:T.blue},{l:"Odd Total",v:combOdd.toFixed(2),c:T.gold},{l:"Prob. Real",v:combProb.toFixed(1)+"%",c:combProb>20?T.green:T.red},{l:"EV",v:(combEV>0?"+":"")+combEV.toFixed(3),c:combEV>0?T.green:T.red}].map(({l,v,c})=>(
+                    <Card key={l} glow={combEV>0}>
+                      <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{l}</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:26,fontWeight:800,color:c}}>{v}</div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Lista de seleções */}
+                <Card>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:12}}>📋 Seleções</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                    {combinadas.map((c,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:`1px solid ${T.border}`}}>
+                        <span style={{fontSize:16}}>{c.leagueFlag}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:12,color:T.muted,marginBottom:2}}>{c.match}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.text}}>{c.market}</div>
+                        </div>
+                        <div style={{textAlign:"center",minWidth:50}}>
+                          <div style={{fontSize:9,color:T.muted}}>ODD</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:800,color:T.gold}}>{c.odd?.toFixed(2)}</div>
+                        </div>
+                        <div style={{textAlign:"center",minWidth:50}}>
+                          <div style={{fontSize:9,color:T.muted}}>PROB</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:T.green}}>{c.prob}%</div>
+                        </div>
+                        <button onClick={()=>setCombinadas(prev=>prev.filter((_,j)=>j!==i))} style={{background:"rgba(255,83,112,0.1)",border:"1px solid rgba(255,83,112,0.2)",borderRadius:7,padding:"4px 9px",color:T.red,fontSize:11,cursor:"pointer"}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* Stake sugerido */}
+                <Card style={{background:"linear-gradient(135deg,rgba(56,211,159,0.05),rgba(12,16,24,1))"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:4}}>STAKE SUGERIDO (Kelly)</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:T.green}}>{currency.symbol} {sugVal.toFixed(2)}</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:2}}>{(sugVal/bankroll*100).toFixed(1)}% da banca</div>
+                    </div>
+                    <div style={{flex:1,textAlign:"center"}}>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:4}}>RETORNO POTENCIAL</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:T.gold}}>{currency.symbol} {(sugVal*combOdd).toFixed(2)}</div>
+                    </div>
+                    <button onClick={analisarCombinada} disabled={loadingComb} style={{padding:"12px 24px",background:"rgba(192,132,252,0.15)",border:"1px solid rgba(192,132,252,0.4)",borderRadius:10,color:T.purple,fontSize:13,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:loadingComb?"not-allowed":"pointer",opacity:loadingComb?0.6:1}}>
+                      {loadingComb?"🔄 Analisando...":"🤖 Analisar com Claude"}
+                    </button>
+                  </div>
+                </Card>
+
+                {combErr&&<div style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:12,padding:"14px 18px",color:T.red,fontSize:13}}>{combErr}</div>}
+                {loadingComb&&<Spinner label="Claude analisando a viabilidade da combinada..."/>}
+
+                {/* Análise Claude da combinada */}
+                {combAnalysis&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                    {/* Veredicto */}
+                    <div style={{padding:"20px 24px",background:combAnalysis.recomendacao==="APOSTAR"?"linear-gradient(135deg,rgba(56,211,159,0.12),rgba(12,16,24,1))":combAnalysis.recomendacao==="EVITAR"?"linear-gradient(135deg,rgba(255,83,112,0.1),rgba(12,16,24,1))":"linear-gradient(135deg,rgba(245,166,35,0.1),rgba(12,16,24,1))",border:`2px solid ${combAnalysis.recomendacao==="APOSTAR"?T.borderG:combAnalysis.recomendacao==="EVITAR"?"rgba(255,83,112,0.4)":"rgba(245,166,35,0.4)"}`,borderRadius:16}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:800,color:combAnalysis.recomendacao==="APOSTAR"?T.green:combAnalysis.recomendacao==="EVITAR"?T.red:T.gold}}>{combAnalysis.recomendacao==="APOSTAR"?"✅":combAnalysis.recomendacao==="EVITAR"?"❌":"⚠️"} {combAnalysis.recomendacao}</div>
+                        <Pill color={combAnalysis.viabilidade==="Alta"?T.green:combAnalysis.viabilidade==="Média"?T.gold:T.red}>Viabilidade {combAnalysis.viabilidade}</Pill>
+                        {combAnalysis.odd_justa&&<div style={{fontSize:12,color:T.muted}}>Odd justa estimada: <span style={{color:T.gold,fontWeight:700}}>{combAnalysis.odd_justa}</span></div>}
+                      </div>
+                      <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{combAnalysis.resumo}</div>
+                    </div>
+                    {/* Análise por seleção */}
+                    <Card>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>🔍 Análise por Seleção</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                        {combAnalysis.analise_selecoes?.map((s,i)=>{
+                          const sc={FORTE:T.green,OK:T.gold,FRACA:T.red}[s.avaliacao]||T.muted;
+                          return(<div key={i} style={{padding:"9px 12px",background:"rgba(255,255,255,0.02)",borderRadius:9,border:`1px solid ${T.border}`}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:12,fontWeight:700,color:T.text,flex:1}}>{s.selecao}</span><Pill color={sc} size={10}>{s.avaliacao}</Pill></div>
+                            <div style={{fontSize:12,color:T.dim,lineHeight:1.5}}>{s.justificativa}</div>
+                          </div>);
+                        })}
+                      </div>
+                    </Card>
+                    {combAnalysis.elo_fraco&&<Card style={{border:"1px solid rgba(255,83,112,0.2)"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:T.red,marginBottom:6}}>⚠️ Elo Mais Fraco</div><div style={{fontSize:12,color:T.text,lineHeight:1.6}}>{combAnalysis.elo_fraco}</div></Card>}
+                    {combAnalysis.alertas?.length>0&&<Card style={{border:"1px solid rgba(245,166,35,0.2)"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:T.gold,marginBottom:8}}>⚠️ Alertas</div>{combAnalysis.alertas.map((a,i)=><div key={i} style={{fontSize:12,color:T.dim,padding:"4px 0",borderBottom:i<combAnalysis.alertas.length-1?`1px solid ${T.border}`:"none"}}>▸ {a}</div>)}</Card>}
+                    <Card style={{background:"linear-gradient(135deg,rgba(192,132,252,0.05),rgba(12,16,24,1))",border:"1px solid rgba(192,132,252,0.15)"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:T.purple,marginBottom:6}}>🤖 Conclusão</div><div style={{fontSize:13,color:T.text,lineHeight:1.8}}>{combAnalysis.conclusao}</div></Card>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Histórico de combinadas */}
+            {combLog.length>0&&(
+              <div style={{marginTop:28}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:16,color:T.text,marginBottom:12}}>📂 Histórico de Combinadas</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {combLog.map((c,i)=>{
+                    const pnl=c.result==="WIN"?+(c.stake*(c.odd-1)).toFixed(2):c.result==="LOSS"?-c.stake:0;
+                    const rc={WIN:T.green,LOSS:T.red,PENDENTE:T.gold}[c.result];
+                    return(
+                      <Card key={i} style={{padding:"12px 16px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{c.date} · {c.selecoes.length} seleções · Odd {c.odd?.toFixed(2)}</div>
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{c.selecoes.map((s,j)=><span key={j} style={{fontSize:10,padding:"2px 7px",background:"rgba(255,255,255,0.04)",borderRadius:5,color:T.dim}}>{s.market}</span>)}</div>
+                          </div>
+                          <div style={{textAlign:"center",minWidth:60}}><div style={{fontSize:9,color:T.muted}}>STAKE</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:T.text}}>{currency.symbol}{c.stake?.toFixed(2)}</div></div>
+                          <div style={{textAlign:"center",minWidth:70}}><div style={{fontSize:9,color:T.muted}}>RESULTADO</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:800,color:rc}}>{c.result==="WIN"?`+${currency.symbol}${pnl}`:c.result==="LOSS"?`-${currency.symbol}${Math.abs(pnl)}`:T.gold&&"PENDENTE"}</div></div>
+                          <div style={{display:"flex",gap:5}}>
+                            {c.result==="PENDENTE"&&<><button onClick={()=>{const u=[...combLog];u[i]={...c,result:"WIN"};saveCombLog(u);}} style={{background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:6,padding:"3px 8px",color:T.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>WIN</button><button onClick={()=>{const u=[...combLog];u[i]={...c,result:"LOSS"};saveCombLog(u);}} style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,padding:"3px 8px",color:T.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>LOSS</button></>}
+                            <button onClick={()=>saveCombLog(combLog.filter((_,j)=>j!==i))} style={{background:"rgba(255,255,255,0.04)",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",color:T.muted,fontSize:10,cursor:"pointer"}}>✕</button>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
         {/* ══ BANCA ══ */}
         {tab==="banca"&&(
           <div>
-            <h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:T.text,margin:"0 0 20px"}}>💰 Banca & P&L</h2>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:22}}>
-              {[{label:"Banca Atual",value:`${currency.symbol} ${(bankroll+totalPnl).toFixed(0)}`,color:totalPnl>=0?T.green:T.red},{label:"P&L Total",value:`${totalPnl>=0?"+":""}${currency.symbol} ${totalPnl.toFixed(2)}`,color:totalPnl>=0?T.green:T.red},{label:"Taxa de Acerto",value:concluded.length?`${(wins/concluded.length*100).toFixed(0)}%`:"—",color:T.gold},{label:"Apostas Ativas",value:pending,color:T.blue}].map(({label,value,color})=>(
-                <Card key={label} glow><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>{label}</div><div style={{fontSize:26,fontWeight:800,color,fontFamily:"'Barlow Condensed',sans-serif"}}>{value}</div></Card>
+            {/* Sub-nav Banca */}
+            <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
+              {[["resumo","💰","Resumo"],["gestao","🛡️","Gestão"],["historico","📈","Performance"],["apostas","📋","Apostas"]].map(([k,ic,lb])=>(
+                <button key={k} onClick={()=>setBancaSubTab(k)} style={{padding:"8px 16px",background:bancaSubTab===k?T.greenDim:"transparent",border:`1px solid ${bancaSubTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:bancaSubTab===k?T.green:T.muted,fontSize:12,fontWeight:bancaSubTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
               ))}
             </div>
 
-            {/* Gráfico de evolução */}
-            {concluded.length>0&&(
-              <Card style={{marginBottom:18}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  📈 Evolução da Banca
-                  <div style={{display:"flex",gap:12}}>
-                    <span style={{fontSize:11,color:T.muted}}>Início: {currency.symbol} {bankroll.toFixed(0)}</span>
-                    <span style={{fontSize:11,color:totalPnl>=0?T.green:T.red,fontWeight:700}}>Atual: {currency.symbol} {(bankroll+totalPnl).toFixed(0)}</span>
-                    <span style={{fontSize:11,color:totalPnl>=0?T.green:T.red,fontWeight:700}}>{totalPnl>=0?"+":""}{(totalPnl/bankroll*100).toFixed(1)}% ROI</span>
+            {/* ── RESUMO ── */}
+            {bancaSubTab==="resumo"&&(()=>{
+              const dailyBets=betLog.filter(b=>{try{return b.date===fmtISO(nowDate())}catch{return false}});
+              const dailyPnl=dailyBets.filter(b=>b.result!=="PENDENTE").reduce((s,b)=>s+(b.result==="WIN"?b.stake*(b.odd-1):-b.stake),0);
+              const stopLoss=bancaConfig.stopLoss||20;
+              const stopLossPct=(Math.abs(Math.min(dailyPnl,0))/(bankroll+totalPnl)*100);
+              const isStopLossHit=stopLossPct>=stopLoss;
+              const maxDrawdown=bancaConfig.maxDrawdown||30;
+              const currentDrawdown=totalPnl<0?Math.abs(totalPnl)/(bankroll)*100:0;
+              const isDrawdownAlert=currentDrawdown>=maxDrawdown*0.7;
+              return(
+              <div>
+                {/* Alertas de risco */}
+                {isStopLossHit&&<div style={{padding:"14px 18px",background:"linear-gradient(135deg,rgba(255,83,112,0.15),rgba(12,16,24,1))",border:"2px solid rgba(255,83,112,0.5)",borderRadius:14,marginBottom:16,display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:24}}>🚨</span><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.red}}>STOP LOSS ATINGIDO</div><div style={{fontSize:12,color:T.dim}}>Você perdeu {stopLossPct.toFixed(1)}% da banca hoje. Limite configurado: {stopLoss}%. Recomendado parar por hoje.</div></div></div>}
+                {isDrawdownAlert&&!isStopLossHit&&<div style={{padding:"12px 16px",background:"rgba(245,166,35,0.08)",border:"1px solid rgba(245,166,35,0.3)",borderRadius:12,marginBottom:16,display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>⚠️</span><div style={{fontSize:12,color:T.gold}}>Drawdown em {currentDrawdown.toFixed(1)}% — aproximando do limite de {maxDrawdown}%. Considere reduzir stakes.</div></div>}
+                {/* KPIs */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
+                  {[{l:"Banca Atual",v:`${currency.symbol} ${(bankroll+totalPnl).toFixed(0)}`,c:totalPnl>=0?T.green:T.red},{l:"P&L Total",v:`${totalPnl>=0?"+":""}${currency.symbol} ${totalPnl.toFixed(2)}`,c:totalPnl>=0?T.green:T.red},{l:"Acerto",v:concluded.length?`${(wins/concluded.length*100).toFixed(0)}%`:"—",c:T.gold},{l:"ROI",v:concluded.length?`${(totalPnl/betLog.filter(b=>b.result!=="PENDENTE").reduce((s,b)=>s+b.stake,0.01)*100).toFixed(1)}%`:"—",c:totalPnl>=0?T.green:T.red}].map(({l,v,c})=>(
+                    <Card key={l} glow><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{l}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color:c}}>{v}</div></Card>
+                  ))}
+                </div>
+                {/* Hoje */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:18}}>
+                  {[{l:"Apostas Hoje",v:dailyBets.length,c:T.blue},{l:"P&L Hoje",v:`${dailyPnl>=0?"+":""}${currency.symbol}${dailyPnl.toFixed(2)}`,c:dailyPnl>=0?T.green:T.red},{l:"Ativas",v:pending,c:T.gold}].map(({l,v,c})=>(
+                    <Card key={l}><div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{l}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:c}}>{v}</div></Card>
+                  ))}
+                </div>
+                {/* Gráfico */}
+                {concluded.length>0&&<Card><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10,display:"flex",justifyContent:"space-between"}}><span>📈 Evolução da Banca</span><span style={{fontSize:11,color:totalPnl>=0?T.green:T.red,fontWeight:700}}>{totalPnl>=0?"+":""}{(totalPnl/bankroll*100).toFixed(1)}% ROI</span></div><Sparkline data={bankCurve} w={Math.min(900,typeof window!=="undefined"?window.innerWidth-120:800)} h={90} color={totalPnl>=0?T.green:T.red}/></Card>}
+              </div>
+              );
+            })()}
+
+            {/* ── GESTÃO PROFISSIONAL ── */}
+            {bancaSubTab==="gestao"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <Card>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:16,color:T.text,marginBottom:16}}>🛡️ Limites de Risco</div>
+                  {[{key:"stopLoss",label:"Stop Loss Diário",desc:"% da banca — para apostas se atingir este limite de perda no dia",default:20,color:T.red},{key:"maxDrawdown",label:"Drawdown Máximo",desc:"% da banca inicial — alerta quando drawdown total atingir este nível",default:30,color:T.orange},{key:"maxDailyBets",label:"Máx. Apostas/Dia",desc:"Número máximo de apostas por dia",default:5,color:T.blue},{key:"maxStakePct",label:"Stake Máximo por Aposta",desc:"% da banca em uma única aposta",default:5,color:T.gold}].map(({key,label,desc,default:def,color})=>(
+                    <div key={key} style={{marginBottom:16,paddingBottom:16,borderBottom:`1px solid ${T.border}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <div><div style={{fontSize:13,fontWeight:700,color:T.text}}>{label}</div><div style={{fontSize:11,color:T.muted}}>{desc}</div></div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <input type="number" value={bancaConfig[key]||def} onChange={e=>saveBancaConfig({...bancaConfig,[key]:Number(e.target.value)})} style={{width:70,background:"rgba(255,255,255,0.05)",border:`1px solid ${color}44`,borderRadius:8,padding:"7px 10px",color,fontSize:14,fontWeight:700,outline:"none",textAlign:"center",fontFamily:"'Barlow Condensed',sans-serif"}}/>
+                          <span style={{fontSize:12,color:T.muted}}>{key==="maxDailyBets"?"apostas":"%"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </Card>
+                <Card>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>💰 Banca Inicial</div>
+                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                    <input type="number" value={bankroll} onChange={e=>{const v=Number(e.target.value);try{localStorage.setItem("bta_bank",v)}catch{};}} style={{flex:1,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 13px",color:T.text,fontSize:16,outline:"none"}}/>
+                    <select value={currency.code} onChange={e=>{const c=CURRENCIES.find(c=>c.code===e.target.value);if(c){try{localStorage.setItem("bta_curr",JSON.stringify(c))}catch{}}}} style={{background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 12px",color:T.text,fontSize:13,outline:"none"}}>
+                      {CURRENCIES.map(c=><option key={c.code} value={c.code} style={{background:T.card}}>{c.code} {c.symbol}</option>)}
+                    </select>
                   </div>
-                </div>
-                <Sparkline data={bankCurve} w={Math.min(900,typeof window!=="undefined"?window.innerWidth-120:800)} h={100} color={totalPnl>=0?T.green:T.red}/>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-                  <span style={{fontSize:10,color:T.muted}}>1ª aposta</span>
-                  <span style={{fontSize:10,color:T.muted}}>Última aposta</span>
-                </div>
-              </Card>
+                </Card>
+              </div>
             )}
 
-            {betLog.length===0?(
-              <Card><div style={{textAlign:"center",padding:44,color:T.muted}}><div style={{fontSize:36,marginBottom:12}}>📋</div><div>Nenhuma aposta registrada. Use o Scanner ou Análise.</div></div></Card>
-            ):(
-              <Card style={{padding:0,overflow:"hidden"}}>
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead><tr style={{background:"rgba(245,166,35,0.07)",borderBottom:"1px solid rgba(245,166,35,0.18)"}}>
-                    {["Data","Partida","Mercado","Odd","Stake","Status","P&L",""].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,color:T.gold,textTransform:"uppercase",letterSpacing:1,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {betLog.map((b,i)=>(
-                      <tr key={b.id} style={{borderBottom:`1px solid ${T.border}`,background:i%2===0?"rgba(255,255,255,0.012)":"transparent"}}>
-                        <td style={{padding:"10px 13px",color:T.muted,fontSize:12}}>{b.date}</td>
-                        <td style={{padding:"10px 13px",color:T.text,fontSize:12,fontWeight:600}}>{b.match}</td>
+            {/* ── HISTÓRICO DE PERFORMANCE ── */}
+            {bancaSubTab==="historico"&&(()=>{
+              const concluded2=betLog.filter(b=>b.result!=="PENDENTE");
+              if(!concluded2.length)return<Card style={{textAlign:"center",padding:52}}><div style={{fontSize:36,marginBottom:12}}>📊</div><div style={{color:T.muted}}>Sem apostas concluídas ainda.</div></Card>;
+
+              // Por mercado
+              const byMarket={};
+              concluded2.forEach(b=>{
+                const k=b.market||b.label||"Outros";
+                if(!byMarket[k])byMarket[k]={wins:0,losses:0,pnl:0,stakes:0};
+                const pnl=b.result==="WIN"?b.stake*(b.odd-1):-b.stake;
+                byMarket[k].pnl+=pnl;byMarket[k].stakes+=b.stake;
+                if(b.result==="WIN")byMarket[k].wins++;else byMarket[k].losses++;
+              });
+              const mktStats=Object.entries(byMarket).map(([k,v])=>({name:k,...v,total:v.wins+v.losses,acerto:v.wins/(v.wins+v.losses)*100,roi:v.pnl/v.stakes*100})).sort((a,b)=>b.roi-a.roi);
+
+              // Por liga
+              const byLeague={};
+              concluded2.forEach(b=>{
+                const k=b.league||"—";
+                if(!byLeague[k])byLeague[k]={wins:0,losses:0,pnl:0};
+                if(b.result==="WIN"){byLeague[k].wins++;byLeague[k].pnl+=b.stake*(b.odd-1);}else{byLeague[k].losses++;byLeague[k].pnl-=b.stake;}
+              });
+
+              // Por mês
+              const byMonth={};
+              concluded2.forEach(b=>{
+                const k=(b.date||"").slice(0,7);
+                if(!k)return;
+                if(!byMonth[k])byMonth[k]={wins:0,losses:0,pnl:0};
+                if(b.result==="WIN"){byMonth[k].wins++;byMonth[k].pnl+=b.stake*(b.odd-1);}else{byMonth[k].losses++;byMonth[k].pnl-=b.stake;}
+              });
+
+              return(
+              <div style={{display:"flex",flexDirection:"column",gap:18}}>
+                {/* Por mercado */}
+                <Card>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:12}}>🎯 Performance por Mercado</div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr>{["Mercado","Apostas","Acerto","ROI","P&L"].map(h=><th key={h} style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,padding:"6px 10px",textAlign:"left",borderBottom:`1px solid ${T.border}`}}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {mktStats.map((m,i)=>(
+                          <tr key={i} style={{borderBottom:`1px solid ${T.border}22`}}>
+                            <td style={{padding:"8px 10px",fontSize:12,fontWeight:600,color:T.text}}>{m.name}</td>
+                            <td style={{padding:"8px 10px",fontSize:12,color:T.muted}}>{m.total}</td>
+                            <td style={{padding:"8px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:m.acerto>=55?T.green:m.acerto>=45?T.gold:T.red}}>{m.acerto.toFixed(0)}%</td>
+                            <td style={{padding:"8px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:m.roi>=0?T.green:T.red}}>{m.roi>=0?"+":""}{m.roi.toFixed(1)}%</td>
+                            <td style={{padding:"8px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:m.pnl>=0?T.green:T.red}}>{m.pnl>=0?"+":""}{currency.symbol}{m.pnl.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+                {/* Por liga */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  <Card>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>🌍 Por Liga</div>
+                    {Object.entries(byLeague).map(([k,v])=>{
+                      const lg=LEAGUES.find(l=>l.name===k);
+                      const roi=v.pnl/(concluded2.filter(b=>(b.league||"—")===k).reduce((s,b)=>s+b.stake,0.01))*100;
+                      return(<div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${T.border}22`}}>
+                        <span style={{fontSize:14}}>{lg?.flag||"🌐"}</span>
+                        <span style={{flex:1,fontSize:12,color:T.text}}>{k}</span>
+                        <span style={{fontSize:12,color:T.muted}}>{v.wins+v.losses}j</span>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:roi>=0?T.green:T.red}}>{roi>=0?"+":""}{roi.toFixed(1)}%</span>
+                      </div>);
+                    })}
+                  </Card>
+                  <Card>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📅 Por Mês</div>
+                    {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6).map(([k,v])=>(
+                      <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${T.border}22`}}>
+                        <span style={{flex:1,fontSize:12,color:T.text}}>{k}</span>
+                        <span style={{fontSize:11,color:T.muted}}>{v.wins+v.losses}j · {v.wins>0?(v.wins/(v.wins+v.losses)*100).toFixed(0):"0"}%</span>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:v.pnl>=0?T.green:T.red}}>{v.pnl>=0?"+":""}{currency.symbol}{v.pnl.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </Card>
+                </div>
+              </div>
+              );
+            })()}
+
+            {/* ── APOSTAS ── */}
+            {bancaSubTab==="apostas"&&(
+              <div>
+                {betLog.length===0?(
+                  <Card><div style={{textAlign:"center",padding:44,color:T.muted}}><div style={{fontSize:36,marginBottom:12}}>📋</div><div>Nenhuma aposta registrada. Use o Scanner ou Análise.</div></div></Card>
+                ):(
+                  <Card style={{padding:0,overflow:"hidden"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"rgba(245,166,35,0.07)",borderBottom:"1px solid rgba(245,166,35,0.18)"}}>
+                        {["Data","Partida","Mercado","Odd","Stake","Status","P&L",""].map(h=><th key={h} style={{padding:"10px 13px",textAlign:"left",fontSize:10,color:T.gold,textTransform:"uppercase",letterSpacing:1,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {betLog.map((b,i)=>{
+                          const pnl=b.result==="WIN"?+(b.stake*(b.odd-1)).toFixed(2):b.result==="LOSS"?-b.stake:0;
+                          const rc={WIN:T.green,LOSS:T.red,PENDENTE:T.gold}[b.result]||T.muted;
+                          return(
+                            <tr key={b.id} style={{borderBottom:`1px solid ${T.border}`,background:i%2===0?"rgba(255,255,255,0.012)":"transparent"}}>
+                              <td style={{padding:"10px 13px",color:T.muted,fontSize:12}}>{b.date}</td>
+                              <td style={{padding:"10px 13px",color:T.text,fontSize:12,fontWeight:600}}>{b.match}</td>
+              </div>
+            )}
+          </div>
+        )}
                         <td style={{padding:"10px 13px",color:T.dim,fontSize:11}}>{b.market}</td>
                         <td style={{padding:"10px 13px",color:T.gold,fontWeight:800,fontSize:14,fontFamily:"'Barlow Condensed',sans-serif"}}>{b.odd.toFixed(2)}</td>
                         <td style={{padding:"10px 13px",color:T.dim,fontSize:12}}>{currency.symbol} {b.stake.toFixed(2)}</td>
