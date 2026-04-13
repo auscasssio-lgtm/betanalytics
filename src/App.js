@@ -507,6 +507,9 @@ export default function App(){
   const[bancaConfig,setBancaConfig]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_bancacfg")||"{}")}catch{return{}}});
   const saveBancaConfig=c=>{try{localStorage.setItem("bta_bancacfg",JSON.stringify(c))}catch{};setBancaConfig(c);};
   const[bancaSubTab,setBancaSubTab]=useState("resumo");
+  const[loadingComb,setLoadingComb]=useState(false);
+  const[combAnalysis,setCombAnalysis]=useState(null);
+  const[combErr,setCombErr]=useState("");
 
   const[simStrat,setSimStrat]=useState("kelly");
   const[simOdd,setSimOdd]=useState(1.90);
@@ -1213,9 +1216,6 @@ export default function App(){
           const combEV=(combProb/100)*combOdd-1;
           const sugStake=Math.max(0,(combProb/100*(combOdd-1)-(1-combProb/100))/(combOdd-1));
           const sugVal=+(bankroll*Math.min(sugStake,0.03)).toFixed(2);
-          const[loadingComb,setLoadingComb]=useState(false);
-          const[combAnalysis,setCombAnalysis]=useState(null);
-          const[combErr,setCombErr]=useState("");
 
           const analisarCombinada=async()=>{
             if(!gptKey){setCombErr("Configure a chave Anthropic em Mais → Perfil.");return;}
@@ -1581,6 +1581,7 @@ ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% 
               </Card>
             )}
           </div>
+        </div>
         )}
 
         {/* ══ MAIS (Ranking + Simulador + Perfil) ══ */}
