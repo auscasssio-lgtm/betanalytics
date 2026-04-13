@@ -84,27 +84,26 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(let i=0;i<f.getDay();i++)days.push(null);for(let d=1;d<=l.getDate();d++)days.push(new Date(y,m,d));return days;}
 
 /* ═══════════════════════════════════════════ API
-   Chamadas diretas do navegador — sem proxy necessário
-   Football-Data.org tem CORS aberto para browsers
+   Chamadas via proxy CORS público — garantidamente sem bloqueio
 ═══════════════════════════════════════════ */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Sempre usa proxy /api/* — funciona no Vercel
-// Football-Data.org bloqueia CORS direto do browser
 async function fdFetch(ep, key, retries = 2) {
-  const [path, qs] = ep.includes("?") ? ep.split("?") : [ep, ""];
-  const url = `/api/fd?endpoint=${encodeURIComponent(path)}${qs ? "&" + qs : ""}`;
-  const r = await fetch(url, { headers: { "X-Auth-Token": key } }).catch(e => { throw new Error("Rede: " + e.message); });
+  const target = `https://api.football-data.org/v4/${ep}`;
+  // allorigins injeta CORS e passa headers customizados
+  const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
+  const r = await fetch(url, {
+    headers: { "X-Auth-Token": key }
+  }).catch(e => { throw new Error("Rede: " + e.message); });
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`FD ${r.status}: ${t.slice(0,120)}`); }
   return r.json();
 }
 
 async function oddsFetch(path, key) {
-  const [endpoint, qs] = path.includes("?") ? path.split("?") : [path, ""];
-  const params = new URLSearchParams(qs);
-  params.set("apiKey", key);
-  const url = `/api/odds?endpoint=${encodeURIComponent(endpoint)}&${params.toString()}`;
+  const sep = path.includes("?") ? "&" : "?";
+  const target = `https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`;
+  const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
   const r = await fetch(url).catch(e => { throw new Error("Odds rede: " + e.message); });
   if (!r.ok) throw new Error(`Odds ${r.status}`);
   return r.json();
