@@ -1577,11 +1577,12 @@ ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% 
                             </tr>
                           );})}
                       </tbody>
-                </table>
-              </Card>
+                    </table>
+                  </Card>
+                )}
+              </div>
             )}
           </div>
-        </div>
         )}
 
         {/* ══ MAIS (Ranking + Simulador + Perfil) ══ */}
