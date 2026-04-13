@@ -1563,24 +1563,20 @@ ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% 
                             <tr key={b.id} style={{borderBottom:`1px solid ${T.border}`,background:i%2===0?"rgba(255,255,255,0.012)":"transparent"}}>
                               <td style={{padding:"10px 13px",color:T.muted,fontSize:12}}>{b.date}</td>
                               <td style={{padding:"10px 13px",color:T.text,fontSize:12,fontWeight:600}}>{b.match}</td>
-              </div>
-            )}
-          </div>
-        )}
-                        <td style={{padding:"10px 13px",color:T.dim,fontSize:11}}>{b.market}</td>
-                        <td style={{padding:"10px 13px",color:T.gold,fontWeight:800,fontSize:14,fontFamily:"'Barlow Condensed',sans-serif"}}>{b.odd.toFixed(2)}</td>
-                        <td style={{padding:"10px 13px",color:T.dim,fontSize:12}}>{currency.symbol} {b.stake.toFixed(2)}</td>
-                        <td style={{padding:"10px 13px"}}><Pill color={b.result==="WIN"?T.green:b.result==="LOSS"?T.red:T.gold} size={10}>{b.result}</Pill></td>
-                        <td style={{padding:"10px 13px",color:b.pnl>=0?T.green:T.red,fontWeight:800,fontSize:13,fontFamily:"'Barlow Condensed',sans-serif"}}>{b.result==="PENDENTE"?"—":`${b.pnl>=0?"+":""}${currency.symbol} ${b.pnl.toFixed(2)}`}</td>
-                        <td style={{padding:"10px 13px"}}>
-                          <div style={{display:"flex",gap:4}}>
-                            {b.result==="PENDENTE"&&<><button onClick={()=>resolveBet(b.id,"WIN")} style={{background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:6,padding:"3px 8px",color:T.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>WIN</button><button onClick={()=>resolveBet(b.id,"LOSS")} style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,padding:"3px 8px",color:T.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>LOSS</button></>}
-                            <button onClick={()=>deleteBet(b.id)} style={{background:"rgba(255,255,255,0.04)",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",color:T.muted,fontSize:10,cursor:"pointer"}}>✕</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                              <td style={{padding:"10px 13px",color:T.dim,fontSize:11}}>{b.market}</td>
+                              <td style={{padding:"10px 13px",color:T.gold,fontWeight:800,fontSize:14,fontFamily:"'Barlow Condensed',sans-serif"}}>{b.odd?.toFixed(2)}</td>
+                              <td style={{padding:"10px 13px",color:T.dim,fontSize:12}}>{currency.symbol} {b.stake?.toFixed(2)}</td>
+                              <td style={{padding:"10px 13px"}}><Pill color={rc} size={10}>{b.result}</Pill></td>
+                              <td style={{padding:"10px 13px",color:pnl>=0?T.green:T.red,fontWeight:800,fontSize:13,fontFamily:"'Barlow Condensed',sans-serif"}}>{b.result==="PENDENTE"?"—":`${pnl>=0?"+":""}${currency.symbol} ${Math.abs(pnl).toFixed(2)}`}</td>
+                              <td style={{padding:"10px 13px"}}>
+                                <div style={{display:"flex",gap:4}}>
+                                  {b.result==="PENDENTE"&&<><button onClick={()=>resolveBet(b.id,"WIN")} style={{background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:6,padding:"3px 8px",color:T.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>WIN</button><button onClick={()=>resolveBet(b.id,"LOSS")} style={{background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,padding:"3px 8px",color:T.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>LOSS</button></>}
+                                  <button onClick={()=>deleteBet(b.id)} style={{background:"rgba(255,255,255,0.04)",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",color:T.muted,fontSize:10,cursor:"pointer"}}>✕</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );})}
+                      </tbody>
                 </table>
               </Card>
             )}
