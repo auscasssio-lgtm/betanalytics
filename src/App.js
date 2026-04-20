@@ -89,20 +89,22 @@ function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(le
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fdFetch(ep, key, retries = 2) {
-  // corsproxy.io passa headers customizados corretamente
-  const target = encodeURIComponent(`https://api.football-data.org/v4/${ep}`);
-  const r = await fetch(`https://corsproxy.io/?url=${target}`, {
-    headers: { "X-Auth-Token": key, "Origin": "https://betanalytics-flame.vercel.app" }
-  }).catch(e => { throw new Error("Rede: " + e.message); });
+  // Usa serverless function do Vercel como proxy — único método que funciona
+  const [path, qs] = ep.includes("?") ? ep.split("?") : [ep, ""];
+  const url = `/api/fd?endpoint=${encodeURIComponent(path)}${qs ? "&" + qs : ""}`;
+  const r = await fetch(url, { headers: { "X-Auth-Token": key } })
+    .catch(e => { throw new Error("Rede: " + e.message); });
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`FD ${r.status}: ${t.slice(0,120)}`); }
   return r.json();
 }
 
 async function oddsFetch(path, key) {
-  const sep = path.includes("?") ? "&" : "?";
-  const target = encodeURIComponent(`https://api.the-odds-api.com/v4/${path}${sep}apiKey=${key}`);
-  const r = await fetch(`https://corsproxy.io/?url=${target}`).catch(e => { throw new Error("Odds rede: " + e.message); });
+  const [endpoint, qs] = path.includes("?") ? path.split("?") : [path, ""];
+  const params = new URLSearchParams(qs);
+  params.set("apiKey", key);
+  const url = `/api/odds?endpoint=${encodeURIComponent(endpoint)}&${params.toString()}`;
+  const r = await fetch(url).catch(e => { throw new Error("Odds rede: " + e.message); });
   if (!r.ok) throw new Error(`Odds ${r.status}`);
   return r.json();
 }
