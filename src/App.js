@@ -1,3 +1,4 @@
+// BetAnalytics v2.1.20260420110518 — build 20260420110518
 import { useState, useCallback, useEffect, useRef } from "react";
 
 /* ═══════════════════════════════════════════ THEME */
