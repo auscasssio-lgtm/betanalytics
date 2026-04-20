@@ -89,13 +89,9 @@ function calDays(y,m){const f=new Date(y,m,1),l=new Date(y,m+1,0),days=[];for(le
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fdFetch(ep, key, retries = 2) {
-  // Usa serverless function do Vercel como proxy
-  // Separa path e query string — passa path sem encoding para o Vercel rotear corretamente
-  const qIdx = ep.indexOf("?");
-  const path = qIdx >= 0 ? ep.slice(0, qIdx) : ep;
-  const qs   = qIdx >= 0 ? ep.slice(qIdx + 1) : "";
-  // Monta URL: /api/fd?endpoint=competitions/PL/matches&dateFrom=...&dateTo=...
-  const url = `/api/fd?endpoint=${path}${qs ? "&" + qs : ""}`;
+  // Codifica o endpoint completo em base64 para evitar problemas com barras na URL
+  const b64 = btoa(ep);
+  const url = `/api/fd?ep=${b64}`;
   const r = await fetch(url, { headers: { "X-Auth-Token": key } })
     .catch(e => { throw new Error("Rede: " + e.message); });
   if (r.status === 429 && retries > 0) { await sleep(7000); return fdFetch(ep, key, retries - 1); }
