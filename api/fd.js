@@ -7,19 +7,16 @@ module.exports = async (req, res) => {
   const key = req.headers["x-auth-token"];
   if (!key) return res.status(401).json({ error: "X-Auth-Token obrigatorio" });
 
-  // req.query contem todos os parametros da URL
-  // endpoint = o path base (ex: "competitions/PL/matches")
-  // os demais parametros (dateFrom, dateTo, season, limit, status) sao passados direto
-  const { endpoint, ...rest } = req.query;
-  if (!endpoint) return res.status(400).json({ error: "endpoint obrigatorio" });
+  // ep contem o endpoint completo codificado em base64
+  const { ep } = req.query;
+  if (!ep) return res.status(400).json({ error: "ep obrigatorio" });
 
-  const extraParams = new URLSearchParams(rest).toString();
-  const url = `https://api.football-data.org/v4/${endpoint}${extraParams ? "?" + extraParams : ""}`;
+  // Decodifica base64 para obter a URL completa
+  const decoded = Buffer.from(ep, "base64").toString("utf8");
+  const url = `https://api.football-data.org/v4/${decoded}`;
 
   try {
-    const upstream = await fetch(url, {
-      headers: { "X-Auth-Token": key }
-    });
+    const upstream = await fetch(url, { headers: { "X-Auth-Token": key } });
     const data = await upstream.json();
     res.setHeader("Cache-Control", "s-maxage=60");
     return res.status(upstream.status).json(data);
