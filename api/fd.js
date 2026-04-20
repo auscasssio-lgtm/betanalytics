@@ -7,14 +7,12 @@ module.exports = async (req, res) => {
   const key = req.headers["x-auth-token"];
   if (!key) return res.status(401).json({ error: "X-Auth-Token obrigatorio" });
 
-  // Reconstrói o endpoint completo a partir da URL raw
-  // Ex: /api/fd?endpoint=competitions/BSA/matches&dateFrom=2026-04-13&dateTo=2026-04-13
-  // req.query.endpoint = "competitions/BSA/matches"
-  // Parâmetros extras (dateFrom, dateTo, etc.) são passados separados
+  // req.query contem todos os parametros da URL
+  // endpoint = o path base (ex: "competitions/PL/matches")
+  // os demais parametros (dateFrom, dateTo, season, limit, status) sao passados direto
   const { endpoint, ...rest } = req.query;
   if (!endpoint) return res.status(400).json({ error: "endpoint obrigatorio" });
 
-  // Reconstrói query string com os parâmetros extras
   const extraParams = new URLSearchParams(rest).toString();
   const url = `https://api.football-data.org/v4/${endpoint}${extraParams ? "?" + extraParams : ""}`;
 
