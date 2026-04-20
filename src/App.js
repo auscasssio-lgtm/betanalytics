@@ -91,7 +91,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fdFetch(ep, key, retries = 2) {
   // Codifica o endpoint completo em base64 para evitar problemas com barras na URL
-  const b64 = btoa(unescape(encodeURIComponent(ep)));
+  const b64 = btoa(ep);
   const url = `/api/fd?ep=${b64}`;
   const r = await fetch(url, { headers: { "X-Auth-Token": key } })
     .catch(e => { throw new Error("Rede: " + e.message); });
@@ -584,7 +584,7 @@ export default function App(){
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
     }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);setAnaStep(0);}
-  },[fdKey,oddsKey,selLeague,selDate,dateStr]);
+  },[fdKey,oddsKey,selLeague,selDate,dateStr,gptKey]);
 
   /* ── SCANNER ── */
   const runScanner=useCallback(async()=>{
