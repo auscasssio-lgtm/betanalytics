@@ -579,7 +579,8 @@ export default function App(){
       setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData});
       setLoadingGpt(true);
       try{
-        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),gptKey);
+        const currentGptKey = localStorage.getItem("bta_gpt") || gptKey;
+        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey);
         setGptAnalysis(result);
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
@@ -876,7 +877,7 @@ export default function App(){
                               <div style={{fontSize:24,fontWeight:800,color:hasValue?T.green:T.muted,fontFamily:"'Barlow Condensed',sans-serif"}}>{r.valueScore}</div>
                             </div>
                             <div style={{display:"flex",gap:6,flexShrink:0}}>
-                              <button onClick={()=>{setSelFix(f);setSelLeague(r.league||LEAGUES[0]);setSelDate(scanDate);setAnalysis({fixture:f,hs:r.hs,as_:r.as_,markets:r.markets,hasOdds:r.hasOdds});setTab("analise");}} style={{padding:"7px 13px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,color:T.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📊 Analisar</button>
+                              <button onClick={()=>{setSelLeague(r.league||LEAGUES[0]);setSelDate(scanDate);loadAnalysis(f);}} style={{padding:"7px 13px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:8,color:T.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📊 Analisar</button>
                               {r.bestMarkets[0]&&<button onClick={()=>addBet(r.bestMarkets[0],null,f)} style={{padding:"7px 12px",background:T.goldDim,border:"1px solid rgba(245,166,35,0.3)",borderRadius:8,color:T.gold,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>+ Apostar</button>}
                             </div>
                           </div>
