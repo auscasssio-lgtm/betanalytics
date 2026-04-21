@@ -501,6 +501,7 @@ export default function App(){
 
   // Apostas Combinadas
   const[combinadas,setCombinadas]=useState([]); // seleções para combinar
+  const[combinadaSugerida,setCombinadadSugerida]=useState(null); // combinada automática do scanner
   const[combLog,setCombLog]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_comb")||"[]")}catch{return[]}});
   const saveCombLog=b=>{try{localStorage.setItem("bta_comb",JSON.stringify(b))}catch{};setCombLog(b);};
 
@@ -589,7 +590,7 @@ export default function App(){
 
   /* ── SCANNER ── */
   const runScanner=useCallback(async()=>{
-    setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);
+    setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);setCombinadadSugerida(null);
     const ds=fmtISO(scanDate);
     const calYear=scanDate.getFullYear();
     const calMonth=scanDate.getMonth();
@@ -650,6 +651,40 @@ export default function App(){
       // Ordena por maior EV absoluto (não relativo) — o que retorna mais em termos absolutos
       luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
       if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
+
+      // Fase 4: gerar Combinada Sugerida automaticamente
+      // Pega o melhor mercado de cada jogo (máx 4 jogos, min 2)
+      // Critério: EV positivo, mercados de jogos diferentes, odd entre 1.50 e 3.50
+      if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
+        const selecoes=[];
+        // Ordena jogos por valueScore e pega o melhor mercado de cada um
+        const jogosOrdenados=[...allResults].sort((a,b)=>b.valueScore-a.valueScore);
+        for(const r of jogosOrdenados){
+          if(selecoes.length>=4)break;
+          const melhorMercado=r.markets
+            .filter(m=>m.ev>0&&m.odd>=1.40&&m.odd<=3.50&&m.prob>=45&&m.cat!=="Escanteios")
+            .sort((a,b)=>b.ev-a.ev)[0];
+          if(melhorMercado){
+            selecoes.push({
+              marketId:`${r.fixture.homeTeam?.id}-${melhorMercado.name}`,
+              match:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,
+              market:melhorMercado.name,
+              odd:melhorMercado.odd,
+              prob:melhorMercado.prob,
+              ev:melhorMercado.ev,
+              league:r.league?.name,
+              leagueFlag:r.league?.flag,
+              justif:melhorMercado.justif
+            });
+          }
+        }
+        if(selecoes.length>=2){
+          const oddComb=+selecoes.reduce((acc,s)=>acc*s.odd,1).toFixed(2);
+          const probComb=+(selecoes.reduce((acc,s)=>acc*(s.prob/100),1)*100).toFixed(1);
+          const evComb=+((probComb/100)*oddComb-1).toFixed(3);
+          setCombinadadSugerida({selecoes,oddComb,probComb,evComb,geradaEm:new Date().toLocaleTimeString("pt-BR")});
+        }
+      }
 
       if(!allResults.length)setScanErr("Não foi possível analisar os jogos. Verifique sua chave.");
     }catch(e){setScanErr("Erro: "+e.message);}finally{setScanning(false);setScanProgress({current:0,total:0,league:""});}
@@ -836,6 +871,62 @@ export default function App(){
                   <div style={{marginTop:12,padding:"9px 14px",background:"rgba(245,166,35,0.08)",borderRadius:10,fontSize:12,color:T.gold}}>
                     💡 <strong>Por que é lucrativa:</strong> A odd {luckyBet.odd?.toFixed(2)} implica probabilidade de {(100/luckyBet.odd).toFixed(0)}%, mas nosso modelo estima {luckyBet.prob}% de chance real — uma diferença de +{(luckyBet.prob-100/luckyBet.odd).toFixed(0)}pp que representa valor real.
                     <span style={{color:T.muted}}> Aposte apenas o que está disposto a perder.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── COMBINADA SUGERIDA AUTOMATICAMENTE ── */}
+              {combinadaSugerida&&!scanning&&(
+                <div style={{marginBottom:20,padding:"18px 20px",background:"linear-gradient(135deg,rgba(192,132,252,0.10),rgba(12,16,24,1))",border:"2px solid rgba(192,132,252,0.35)",borderRadius:16,position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",top:12,right:16,fontSize:32,opacity:0.12}}>🎰</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                    <span style={{fontSize:18}}>🎰</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.purple}}>Combinada Sugerida do Dia</span>
+                    <span style={{fontSize:10,color:T.muted,marginLeft:4}}>gerada às {combinadaSugerida.geradaEm}</span>
+                  </div>
+                  {/* Seleções */}
+                  <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
+                    {combinadaSugerida.selecoes.map((s,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(192,132,252,0.06)",borderRadius:9,border:"1px solid rgba(192,132,252,0.15)"}}>
+                        <span style={{fontSize:14}}>{s.leagueFlag}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:11,color:T.muted}}>{s.match}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.text}}>{s.market}</div>
+                          <div style={{fontSize:10,color:T.dim}}>{s.justif}</div>
+                        </div>
+                        <div style={{textAlign:"center"}}>
+                          <div style={{fontSize:9,color:T.muted}}>ODD</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:800,color:T.purple}}>{s.odd?.toFixed(2)}</div>
+                        </div>
+                        <div style={{textAlign:"center"}}>
+                          <div style={{fontSize:9,color:T.muted}}>PROB</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:T.green}}>{s.prob}%</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Resumo */}
+                  <div style={{display:"flex",alignItems:"center",gap:20,padding:"12px 16px",background:"rgba(192,132,252,0.08)",borderRadius:10,flexWrap:"wrap"}}>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:2}}>ODD TOTAL</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:32,fontWeight:800,color:T.purple}}>{combinadaSugerida.oddComb}</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:2}}>PROB. REAL</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:700,color:combinadaSugerida.probComb>=30?T.green:T.gold}}>{combinadaSugerida.probComb}%</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:2}}>EV</div>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:700,color:combinadaSugerida.evComb>0?T.green:T.red}}>{combinadaSugerida.evComb>0?"+":""}{combinadaSugerida.evComb}</div>
+                    </div>
+                    <div style={{flex:1,display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                      <button onClick={()=>{setCombinadas(combinadaSugerida.selecoes);setTab("combinadas");}} style={{padding:"10px 18px",background:"rgba(192,132,252,0.15)",border:"1px solid rgba(192,132,252,0.4)",borderRadius:9,color:T.purple,fontSize:12,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:"pointer"}}>
+                        🎰 Ver na aba Combinadas
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{marginTop:10,fontSize:11,color:T.muted}}>
+                    💡 Combinada selecionada automaticamente com os mercados de maior EV de jogos diferentes. Aposte apenas o que está disposto a perder.
                   </div>
                 </div>
               )}
