@@ -284,7 +284,7 @@ function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
 // Export bookmakers separately for display
 buildMarkets.lastBookmakers=[];
 
-function calcKelly(prob,odd){return Math.max(0,(prob/100*(odd-1)-(1-prob/100))/(odd-1));}
+function calcKelly(prob,odd,fraction=0.5){return Math.max(0,(prob/100*(odd-1)-(1-prob/100))/(odd-1))*fraction;}
 function calcValueScore(markets){const best=markets.filter(m=>m.rec==="APOSTAR"&&m.ev>0);if(!best.length)return 0;return Math.round(Math.max(...best.map(m=>m.ev))*40+Math.max(...best.map(m=>m.score))*6);}
 
 /* ═══════════════════════════════════════════ UI ATOMS */
@@ -344,13 +344,13 @@ function Calendar({selected,onSelect,onClose}){
 }
 
 /* ═══════════════════════════════════════════ MARKET CARD (expansível) */
-function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,isInCombinada=false}){
+function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,kellyFraction=0.5,isInCombinada=false}){
   const[open,setOpen]=useState(false);
   const[customStake,setCustomStake]=useState(null); // null = usar sugestão
   const rs=RS[m.rec];
   const info=MARKET_INFO[m.name]||null;
-  const kelly=calcKelly(m.prob,m.odd);
-  const kellyStake=+(bankroll*kelly*0.25).toFixed(2);
+  const kelly=calcKelly(m.prob,m.odd,kellyFraction);
+  const kellyStake=+(bankroll*kelly).toFixed(2);
   const fixedStake=+(bankroll*0.02).toFixed(2);
   const sugStake=strategy==="kelly"?kellyStake:fixedStake;
   const finalStake=customStake!==null?customStake:sugStake;
@@ -554,6 +554,17 @@ export default function App(){
   const[bancaConfig,setBancaConfig]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_bancacfg")||"{}")}catch{return{}}});
   const saveBancaConfig=c=>{try{localStorage.setItem("bta_bancacfg",JSON.stringify(c))}catch{};setBancaConfig(c);};
   const[bancaSubTab,setBancaSubTab]=useState("resumo");
+
+  // Line Movement — rastrear histórico de odds
+  const[oddsHistory,setOddsHistory]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_oddshistory")||"{}")}catch{return{}}});
+  const saveOddsHistory=h=>{try{localStorage.setItem("bta_oddshistory",JSON.stringify(h))}catch{};setOddsHistory(h);};
+
+  // Backtesting — ROI das recomendações do modelo
+  const[modelBets,setModelBets]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_modelbets")||"[]")}catch{return[]}});
+  const saveModelBets=b=>{try{localStorage.setItem("bta_modelbets",JSON.stringify(b))}catch{};setModelBets(b);};
+
+  // Kelly fracionado
+  const[kellyFraction,setKellyFraction]=useState(()=>{try{return Number(localStorage.getItem("bta_kellyfrac")||0.5)}catch{return 0.5}});
   const[loadingComb,setLoadingComb]=useState(false);
   const[combAnalysis,setCombAnalysis]=useState(null);
   const[combErr,setCombErr]=useState("");
@@ -763,6 +774,55 @@ export default function App(){
       // Ordena por maior EV absoluto (não relativo) — o que retorna mais em termos absolutos
       luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
       if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
+
+      // Line Movement — salva snapshot e detecta movimentos de odds
+      const now=Date.now();
+      const newHistory={...oddsHistory};
+      const lineMovements=[];
+      allResults.forEach(r=>{
+        const key=`${r.fixture.homeTeam?.id}-${r.fixture.awayTeam?.id}`;
+        const currentOdds={};
+        r.markets.forEach(m=>{if(m.hasRealOdd)currentOdds[m.name]=m.odd;});
+        if(Object.keys(currentOdds).length>0){
+          const prev=newHistory[key];
+          if(prev?.odds){
+            Object.entries(currentOdds).forEach(([mkt,odd])=>{
+              const prevOdd=prev.odds[mkt];
+              if(prevOdd&&Math.abs(odd-prevOdd)/prevOdd>0.04){
+                const falling=odd<prevOdd;
+                const pct=Math.abs(((odd-prevOdd)/prevOdd)*100).toFixed(1);
+                lineMovements.push({
+                  fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,
+                  league:r.league?.name,leagueFlag:r.league?.flag,
+                  market:mkt,prevOdd:+prevOdd.toFixed(2),currentOdd:+odd.toFixed(2),
+                  direction:falling?"⬇️ Caindo":"⬆️ Subindo",pct,
+                  signal:falling?"💰 Dinheiro profissional entrando":"⚠️ Valor pode estar desaparecendo"
+                });
+              }
+            });
+          }
+          newHistory[key]={odds:currentOdds,ts:now,fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`};
+        }
+      });
+      saveOddsHistory(newHistory);
+      if(lineMovements.length>0){
+        // Adiciona line movements ao primeiro resultado para exibir
+        setScanResults(prev=>{const updated=[...prev];if(updated[0])updated[0]={...updated[0],lineMovements};return updated;});
+      }
+      // Salva variável para exibir separado
+      if(lineMovements.length>0)window._betaLineMovements=lineMovements;
+
+      // Backtesting — registra recomendações do modelo para avaliar ROI depois
+      const newModelBets=[...modelBets];
+      allResults.forEach(r=>{
+        r.markets.filter(m=>m.rec==="APOSTAR"&&m.ev>0).slice(0,1).forEach(m=>{
+          const bkey=`${r.fixture.homeTeam?.id}-${r.fixture.awayTeam?.id}-${m.name}-${fmtISO(scanDate)}`;
+          if(!newModelBets.find(b=>b.key===bkey)){
+            newModelBets.unshift({key:bkey,date:fmtISO(scanDate),fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,market:m.name,odd:m.odd,prob:m.prob,ev:m.ev,league:r.league?.name,result:"PENDENTE"});
+          }
+        });
+      });
+      saveModelBets(newModelBets.slice(0,300));
 
       // Fase 4: gerar Combinada Sugerida automaticamente
       // Critério DIFERENTE da Chance Lucrativa:
@@ -992,6 +1052,32 @@ export default function App(){
                     💡 <strong>Por que é lucrativa:</strong> A odd {luckyBet.odd?.toFixed(2)} implica probabilidade de {(100/luckyBet.odd).toFixed(0)}%, mas nosso modelo estima {luckyBet.prob}% de chance real — uma diferença de +{(luckyBet.prob-100/luckyBet.odd).toFixed(0)}pp que representa valor real.
                     <span style={{color:T.muted}}> Aposte apenas o que está disposto a perder.</span>
                   </div>
+                </div>
+              )}
+
+              {/* ── LINE MOVEMENT ── */}
+              {!scanning&&window._betaLineMovements?.length>0&&(
+                <div style={{marginBottom:16,padding:"14px 18px",background:"linear-gradient(135deg,rgba(78,201,240,0.08),rgba(12,16,24,1))",border:"1px solid rgba(78,201,240,0.25)",borderRadius:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <span style={{fontSize:16}}>📊</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.blue}}>Line Movement Detectado</span>
+                    <span style={{fontSize:10,color:T.muted}}>— odds mudaram desde o último scan</span>
+                  </div>
+                  {window._betaLineMovements.slice(0,5).map((lm,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"rgba(78,201,240,0.05)",borderRadius:8,marginBottom:5,flexWrap:"wrap"}}>
+                      <span style={{fontSize:12}}>{lm.leagueFlag}</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:11,color:T.muted}}>{lm.fixture}</div>
+                        <div style={{fontSize:12,fontWeight:600,color:T.text}}>{lm.market}</div>
+                      </div>
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <span style={{fontSize:12,color:T.muted,textDecoration:"line-through"}}>{lm.prevOdd}</span>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:800,color:lm.direction.includes("Caindo")?T.green:T.red}}>{lm.currentOdd}</span>
+                        <span style={{fontSize:11,fontWeight:700,color:lm.direction.includes("Caindo")?T.green:T.red}}>{lm.direction} {lm.pct}%</span>
+                      </div>
+                      <div style={{fontSize:10,color:lm.direction.includes("Caindo")?T.green:T.gold,width:"100%",marginTop:2}}>{lm.signal}</div>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -1373,7 +1459,7 @@ export default function App(){
                         {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} onAddCombinada={(mk)=>setCombinadas(prev=>{const exists=prev.find(c=>c.marketId===`${f.homeTeam?.id}-${mk.name}`);if(exists)return prev.filter(c=>c.marketId!==`${f.homeTeam?.id}-${mk.name}`);return[...prev,{marketId:`${f.homeTeam?.id}-${mk.name}`,match:`${f.homeTeam?.name} x ${f.awayTeam?.name}`,market:mk.name,odd:mk.odd,prob:mk.prob,ev:mk.ev,league:selLeague.name,leagueFlag:selLeague.flag}];})} isInCombinada={!!combinadas.find(c=>c.marketId===`${f.homeTeam?.id}-${m.name}`)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
+                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} onAddCombinada={(mk)=>setCombinadas(prev=>{const exists=prev.find(c=>c.marketId===`${f.homeTeam?.id}-${mk.name}`);if(exists)return prev.filter(c=>c.marketId!==`${f.homeTeam?.id}-${mk.name}`);return[...prev,{marketId:`${f.homeTeam?.id}-${mk.name}`,match:`${f.homeTeam?.name} x ${f.awayTeam?.name}`,market:mk.name,odd:mk.odd,prob:mk.prob,ev:mk.ev,league:selLeague.name,leagueFlag:selLeague.flag}];})} isInCombinada={!!combinadas.find(c=>c.marketId===`${f.homeTeam?.id}-${m.name}`)} bankroll={bankroll} currency={currency} strategy={preferredStrategy} kellyFraction={kellyFraction}/>)}
                       </div>
                       {/* Comparação de Odds por Casa */}
                       {analysis.bookmakers?.length>0&&(
@@ -1714,7 +1800,7 @@ CRITÉRIO DE AVALIAÇÃO:
           <div>
             {/* Sub-nav Banca */}
             <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
-              {[["resumo","💰","Resumo"],["gestao","🛡️","Gestão"],["historico","📈","Performance"],["apostas","📋","Apostas"],["live","🔴","Live"]].map(([k,ic,lb])=>(
+              {[["resumo","💰","Resumo"],["gestao","🛡️","Gestão"],["historico","📈","Performance"],["backtesting","🔬","Backtesting"],["apostas","📋","Apostas"],["live","🔴","Live"]].map(([k,ic,lb])=>(
                 <button key={k} onClick={()=>setBancaSubTab(k)} style={{padding:"8px 16px",background:bancaSubTab===k?T.greenDim:"transparent",border:`1px solid ${bancaSubTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:bancaSubTab===k?T.green:T.muted,fontSize:12,fontWeight:bancaSubTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
               ))}
             </div>
@@ -1770,7 +1856,24 @@ CRITÉRIO DE AVALIAÇÃO:
                   ))}
                 </Card>
                 <Card>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>💰 Banca Inicial</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>📐 Kelly Fracionado</div>
+                  <div style={{fontSize:12,color:T.muted,marginBottom:12}}>Apostadores profissionais usam ¼ a ½ Kelly para reduzir variância. Kelly completo (1.0) maximiza retorno mas tem alta volatilidade.</div>
+                  <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10}}>
+                    <input type="range" min="0.1" max="1.0" step="0.05" value={kellyFraction} onChange={e=>{const v=Number(e.target.value);setKellyFraction(v);try{localStorage.setItem("bta_kellyfrac",v)}catch{}}} style={{flex:1,accentColor:T.green}}/>
+                    <div style={{textAlign:"center",minWidth:60}}>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:26,fontWeight:800,color:T.green}}>{(kellyFraction*100).toFixed(0)}%</div>
+                      <div style={{fontSize:9,color:T.muted}}>do Kelly</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    {[["10%",0.1,"Conservador"],["25%",0.25,"¼ Kelly"],["50%",0.50,"½ Kelly ★"],["75%",0.75,"¾ Kelly"],["100%",1.0,"Kelly Pleno"]].map(([lb,val,desc])=>(
+                      <button key={lb} onClick={()=>{setKellyFraction(val);try{localStorage.setItem("bta_kellyfrac",val)}catch{}}} style={{padding:"5px 8px",background:Math.abs(kellyFraction-val)<0.01?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${Math.abs(kellyFraction-val)<0.01?T.borderG:T.border}`,borderRadius:7,cursor:"pointer",textAlign:"center"}}>
+                        <div style={{fontSize:11,fontWeight:700,color:Math.abs(kellyFraction-val)<0.01?T.green:T.text}}>{lb}</div>
+                        <div style={{fontSize:9,color:T.muted}}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </Card>
                   <div style={{display:"flex",gap:12,alignItems:"center"}}>
                     <input type="number" value={bankroll} onChange={e=>{const v=Number(e.target.value);try{localStorage.setItem("bta_bank",v)}catch{};}} style={{flex:1,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 13px",color:T.text,fontSize:16,outline:"none"}}/>
                     <select value={currency.code} onChange={e=>{const c=CURRENCIES.find(c=>c.code===e.target.value);if(c){try{localStorage.setItem("bta_curr",JSON.stringify(c))}catch{}}}} style={{background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 12px",color:T.text,fontSize:13,outline:"none"}}>
@@ -1862,6 +1965,88 @@ CRITÉRIO DE AVALIAÇÃO:
                     ))}
                   </Card>
                 </div>
+              </div>
+              );
+            })()}
+
+            {/* ── BACKTESTING ── */}
+            {bancaSubTab==="backtesting"&&(()=>{
+              const concluded2=modelBets.filter(b=>b.result!=="PENDENTE");
+              const pending2=modelBets.filter(b=>b.result==="PENDENTE");
+              const wins2=concluded2.filter(b=>b.result==="WIN").length;
+              const totalStaked=concluded2.reduce((s,b)=>s+1,0); // 1 unidade por aposta
+              const totalReturn=concluded2.filter(b=>b.result==="WIN").reduce((s,b)=>s+b.odd,0);
+              const roi=totalStaked>0?+((totalReturn-totalStaked)/totalStaked*100).toFixed(1):0;
+              const avgEv=concluded2.length?+(concluded2.reduce((s,b)=>s+b.ev,0)/concluded2.length).toFixed(3):0;
+              const hitRate=concluded2.length?+(wins2/concluded2.length*100).toFixed(1):0;
+              return(
+              <div>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.text,marginBottom:4}}>🔬 Backtesting — ROI do Modelo</div>
+                  <div style={{fontSize:12,color:T.muted}}>Avalia se as recomendações do sistema têm valor real. Registradas automaticamente pelo scanner.</div>
+                </div>
+                {modelBets.length===0?(
+                  <Card style={{textAlign:"center",padding:52}}>
+                    <div style={{fontSize:36,marginBottom:12}}>🔬</div>
+                    <div style={{fontSize:14,color:T.dim,marginBottom:6}}>Sem dados ainda</div>
+                    <div style={{fontSize:12,color:T.muted}}>Use o Scanner — as apostas recomendadas pelo modelo são registradas automaticamente para análise posterior.</div>
+                  </Card>
+                ):(
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    {/* KPIs do modelo */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+                      {[{l:"Apostas Analisadas",v:concluded2.length,c:T.blue},{l:"Taxa de Acerto",v:hitRate+"%",c:hitRate>=55?T.green:hitRate>=45?T.gold:T.red},{l:"ROI do Modelo",v:(roi>=0?"+":"")+roi+"%",c:roi>=0?T.green:T.red},{l:"EV Médio",v:(avgEv>=0?"+":"")+avgEv,c:avgEv>=0?T.green:T.red}].map(({l,v,c})=>(
+                        <Card key={l} glow={roi>0}>
+                          <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{l}</div>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:c}}>{v}</div>
+                        </Card>
+                      ))}
+                    </div>
+                    {pending2.length>0&&(
+                      <Card style={{border:"1px solid rgba(245,166,35,0.2)"}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.gold,marginBottom:10}}>⏳ Apostas Pendentes de Resultado ({pending2.length})</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {pending2.slice(0,10).map((b,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:`1px solid ${T.border}`}}>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:10,color:T.muted}}>{b.date} · {b.league}</div>
+                                <div style={{fontSize:12,fontWeight:600,color:T.text}}>{b.fixture}</div>
+                                <div style={{fontSize:11,color:T.gold}}>{b.market} @ {b.odd?.toFixed(2)}</div>
+                              </div>
+                              <div style={{display:"flex",gap:5}}>
+                                <button onClick={()=>{const u=[...modelBets];const idx=u.findIndex(x=>x.key===b.key);if(idx>=0){u[idx]={...u[idx],result:"WIN"};saveModelBets(u);}}} style={{padding:"4px 10px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:6,color:T.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>WIN</button>
+                                <button onClick={()=>{const u=[...modelBets];const idx=u.findIndex(x=>x.key===b.key);if(idx>=0){u[idx]={...u[idx],result:"LOSS"};saveModelBets(u);}}} style={{padding:"4px 10px",background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,color:T.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>LOSS</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+                    {concluded2.length>0&&(
+                      <Card>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Histórico do Modelo</div>
+                        <div style={{overflowX:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse"}}>
+                            <thead><tr>{["Data","Partida","Mercado","Odd","Prob","EV","Resultado"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}</tr></thead>
+                            <tbody>
+                              {concluded2.slice(0,20).map((b,i)=>(
+                                <tr key={i} style={{borderBottom:`1px solid ${T.border}22`}}>
+                                  <td style={{padding:"7px 10px",fontSize:11,color:T.muted}}>{b.date}</td>
+                                  <td style={{padding:"7px 10px",fontSize:11,color:T.text,fontWeight:600}}>{b.fixture}</td>
+                                  <td style={{padding:"7px 10px",fontSize:11,color:T.dim}}>{b.market}</td>
+                                  <td style={{padding:"7px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:T.gold}}>{b.odd?.toFixed(2)}</td>
+                                  <td style={{padding:"7px 10px",fontSize:11,color:T.text}}>{b.prob}%</td>
+                                  <td style={{padding:"7px 10px",fontSize:11,color:b.ev>=0?T.green:T.red}}>{b.ev>=0?"+":""}{b.ev}</td>
+                                  <td style={{padding:"7px 10px"}}><Pill color={b.result==="WIN"?T.green:T.red} size={10}>{b.result}</Pill></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+                  </div>
+                )}
               </div>
               );
             })()}
