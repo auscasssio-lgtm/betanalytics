@@ -110,21 +110,48 @@ async function oddsFetch(path, key) {
   return r.json();
 }
 
-async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, anthropicKey) {
+async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, anthropicKey, h2h, standings, homeFormHome, awayFormAway, confidenceLabel) {
   const top = (markets || []).filter(m => m.rec === "APOSTAR" && m.cat !== "Escanteios").slice(0, 3);
   const cornerMarkets = (markets || []).filter(m => m.cat === "Escanteios").slice(0, 3);
   const fmtM = m => `• ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | ${m.justif}`;
 
-  const prompt = `Você é analista sênior de apostas. Analise ESTA partida e responda APENAS JSON válido.
+  // H2H summary
+  const h2hText = h2h ? `
+H2H (últimos ${h2h.matches} confrontos diretos):
+- ${fixture.homeTeam?.name} venceu: ${h2h.homeWins}x | Empates: ${h2h.draws}x | ${fixture.awayTeam?.name} venceu: ${h2h.awayWins}x
+- Média de gols por jogo: ${h2h.avgGoals}
+- Últimos resultados: ${h2h.results.map(r=>`${r.date} ${r.score} (${r.winner==="D"?"Empate":r.winner==="H"?fixture.homeTeam?.name+" venceu":fixture.awayTeam?.name+" venceu"})`).join(" | ")}` : "H2H: Dados não disponíveis";
+
+  // Standings summary
+  const standText = standings ? `
+POSIÇÃO NA TABELA (${standings.totalTeams} times):
+- ${fixture.homeTeam?.name}: ${standings.homePos}º lugar | ${standings.homePoints} pts | Saldo de gols: ${standings.homeGD>0?"+":""}${standings.homeGD}
+- ${fixture.awayTeam?.name}: ${standings.awayPos}º lugar | ${standings.awayPoints} pts | Saldo de gols: ${standings.awayGD>0?"+":""}${standings.awayGD}` : "Classificação: Dados não disponíveis";
+
+  // Home/Away form
+  const formText = `
+FORMA RECENTE ESPECÍFICA:
+- ${fixture.homeTeam?.name} em casa (últimos 5): ${homeFormHome?.join(" ") || "N/D"} | Gols/jogo em casa: ${homeFormHome ? (homeFormHome.filter(r=>r!=="?").length > 0 ? "calculado" : "N/D") : "N/D"}
+- ${fixture.awayTeam?.name} fora (últimos 5): ${awayFormAway?.join(" ") || "N/D"}`;
+
+  const prompt = `Você é analista sênior de apostas esportivas com 15 anos de experiência. Analise ESTA partida com TODOS os dados disponíveis.
 
 PARTIDA: ${fixture.homeTeam?.name} x ${fixture.awayTeam?.name} | ${leagueName} | ${dateStr}
+CONFIANÇA DOS DADOS: ${confidenceLabel||"N/D"} — use isso para calibrar sua análise
+
+ESTATÍSTICAS DA TEMPORADA:
 CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}% | Forma: ${homeStats?.form?.join(" ")||"N/D"}
 VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}% | Forma: ${awayStats?.form?.join(" ")||"N/D"}
+${formText}
+${standText}
+${h2hText}
+
 MERCADOS EV+: ${top.map(fmtM).join("\n")||"Nenhum"}
 ESCANTEIOS: ${cornerMarkets.map(fmtM).join("\n")||"N/D"}
-INSTRUÇÃO: NÃO repita sempre os mesmos mercados. Escolha baseado nos dados DESTE jogo.
 
-{"resumo":"2-3 frases","analise_casa":"análise","analise_visitante":"análise","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/etc","placar_provavel":"X-Y","placar_justificativa":"1-2 frases","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR","risco":"Baixo","justificativa":"para este jogo","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"2-3 frases","segunda_opcao":"nome","segunda_opcao_justificativa":"1-2 frases","alertas":["alerta"],"conclusao":"conselho final"}`;
+INSTRUÇÃO: Use o H2H e a posição na tabela para refinar as probabilidades. Um time em 1º contra um em último tem dinâmica diferente. O histórico de confrontos diretos revela padrões importantes. NÃO repita sempre os mesmos mercados.
+
+{"resumo":"2-3 frases incluindo contexto de tabela e H2H","analise_casa":"análise com forma em casa e posição","analise_visitante":"análise com forma fora e posição","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/Dominância Casa/etc","placar_provavel":"X-Y","placar_justificativa":"baseada em H2H e forma recente","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR","risco":"Baixo","justificativa":"para este jogo com contexto H2H","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"2-3 frases com H2H e tabela","segunda_opcao":"nome","segunda_opcao_justificativa":"1-2 frases","alertas":["alerta específico"],"conclusao":"conselho final mencionando posição na tabela e H2H"}`;
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -585,30 +612,67 @@ export default function App(){
       const calMonth=selDate.getMonth();
       const calendarLeagues=["BSA","MLS","CLI","CSA"];
       const season=calendarLeagues.includes(selLeague.code)?calYear:(calMonth>=7?calYear:calYear-1);
-      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
+
+      // Busca histórico dos dois times
+      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=15&status=FINISHED`,fdKey);
       await sleep(6500);
       setAnaStep(2);
-      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
+      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=15&status=FINISHED`,fdKey);
       const hs=parseStatsFD(hr,fixture.homeTeam.id);
       const as_=parseStatsFD(ar,fixture.awayTeam.id);
+
+      // Fator Casa/Fora refinado — últimas 5 em casa vs últimas 5 fora
+      const homeMatchesAtHome=(hr.matches||[]).filter(m=>m.homeTeam?.id===fixture.homeTeam.id&&m.status==="FINISHED").slice(0,5);
+      const awayMatchesAway=(ar.matches||[]).filter(m=>m.awayTeam?.id===fixture.awayTeam.id&&m.status==="FINISHED").slice(0,5);
+      const homeFormHome=homeMatchesAtHome.map(m=>{const s=m.score?.fullTime;if(!s)return"?";return s.home>s.away?"W":s.home<s.away?"L":"D";});
+      const awayFormAway=awayMatchesAway.map(m=>{const s=m.score?.fullTime;if(!s)return"?";return s.away>s.home?"W":s.away<s.home?"L":"D";});
+      const homeGoalsHome=homeMatchesAtHome.length?+(homeMatchesAtHome.reduce((a,m)=>a+(m.score?.fullTime?.home||0),0)/homeMatchesAtHome.length).toFixed(2):null;
+      const awayGoalsAway=awayMatchesAway.length?+(awayMatchesAway.reduce((a,m)=>a+(m.score?.fullTime?.away||0),0)/awayMatchesAway.length).toFixed(2):null;
+
+      // Filtro de confiança
+      const confidence=Math.min(100,Math.round(((hs?.played||0)+(as_?.played||0))/24*100));
+      const confidenceLabel=confidence>=75?"Alta":confidence>=50?"Média":confidence>=25?"Baixa":"Insuficiente";
+
+      // H2H — confronto direto
+      let h2h=null;
+      try{
+        await sleep(3500);
+        const h2hData=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season-1}&limit=10&status=FINISHED`,fdKey);
+        const h2hMatches=(h2hData.matches||[]).filter(m=>(m.homeTeam?.id===fixture.homeTeam.id&&m.awayTeam?.id===fixture.awayTeam.id)||(m.homeTeam?.id===fixture.awayTeam.id&&m.awayTeam?.id===fixture.homeTeam.id)).slice(0,5);
+        if(h2hMatches.length>0){
+          const homeWins=h2hMatches.filter(m=>{const s=m.score?.fullTime;if(!s)return false;return(m.homeTeam?.id===fixture.homeTeam.id&&s.home>s.away)||(m.awayTeam?.id===fixture.homeTeam.id&&s.away>s.home);}).length;
+          const draws=h2hMatches.filter(m=>{const s=m.score?.fullTime;return s&&s.home===s.away;}).length;
+          const awayWins=h2hMatches.length-homeWins-draws;
+          const totalGoals=h2hMatches.reduce((a,m)=>{const s=m.score?.fullTime;return a+(s?(s.home+s.away):0);},0);
+          h2h={matches:h2hMatches.length,homeWins,draws,awayWins,avgGoals:+(totalGoals/h2hMatches.length).toFixed(1),results:h2hMatches.slice(0,3).map(m=>{const s=m.score?.fullTime;const isHome=m.homeTeam?.id===fixture.homeTeam.id;return{date:(m.utcDate||"").slice(0,10),score:isHome?`${s?.home}-${s?.away}`:`${s?.away}-${s?.home}`,winner:s?.home===s?.away?"D":isHome?(s?.home>s?.away?"H":"A"):(s?.away>s?.home?"H":"A")};})};
+        }
+      }catch(e){console.warn("H2H error:",e.message);}
+
+      // Posição na tabela
+      let standings=null;
+      try{
+        await sleep(3500);
+        const standData=await fdFetch(`competitions/${selLeague.code}/standings?season=${season}`,fdKey);
+        const table=standData?.standings?.[0]?.table||[];
+        const homePos=table.find(t=>t.team?.id===fixture.homeTeam.id);
+        const awayPos=table.find(t=>t.team?.id===fixture.awayTeam.id);
+        if(homePos&&awayPos)standings={
+          homePos:homePos.position,homePoints:homePos.points,homeGD:homePos.goalDifference,
+          awayPos:awayPos.position,awayPoints:awayPos.points,awayGD:awayPos.goalDifference,
+          totalTeams:table.length
+        };
+      }catch(e){console.warn("Standings error:",e.message);}
+
       let oddsData=null;
       try{const allOdds=await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`,oddsKey);oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((fixture.homeTeam.name||"").toLowerCase().split(" ")[0])):null;}catch{}
       setAnaStep(3);
       const builtMarkets=buildMarkets(hs,as_,oddsData,selLeague.code);
-      // Extrai bookmakers para comparação de odds
-      const bookmakers=oddsData?.bookmakers?.map(b=>{
-        const bk={name:b.title||b.key};
-        b.markets?.forEach(mkt=>{
-          if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{if(o.name==="Home")bk.home=o.price;if(o.name==="Away")bk.away=o.price;if(o.name==="Draw")bk.draw=o.price;});
-          if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1)bk.over25=o.price;if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1)bk.under25=o.price;});
-        });
-        return bk;
-      }).filter(b=>Object.keys(b).length>1)||[];
-      setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData,bookmakers});
+      const bookmakers=oddsData?.bookmakers?.map(b=>{const bk={name:b.title||b.key};b.markets?.forEach(mkt=>{if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{if(o.name==="Home")bk.home=o.price;if(o.name==="Away")bk.away=o.price;if(o.name==="Draw")bk.draw=o.price;});if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1)bk.over25=o.price;if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1)bk.under25=o.price;});});return bk;}).filter(b=>Object.keys(b).length>1)||[];
+      setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData,bookmakers,h2h,standings,confidence,confidenceLabel,homeFormHome,awayFormAway,homeGoalsHome,awayGoalsAway});
       setLoadingGpt(true);
       try{
-        const currentGptKey = localStorage.getItem("bta_gpt") || gptKey;
-        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey);
+        const currentGptKey=localStorage.getItem("bta_gpt")||gptKey;
+        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey,h2h,standings,homeFormHome,awayFormAway,confidenceLabel);
         setGptAnalysis(result);
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
@@ -1226,6 +1290,71 @@ export default function App(){
                   {/* ── DADOS BRUTOS (expansível) ── */}
                   {showRawData&&(
                     <div style={{marginBottom:24,padding:18,background:"rgba(255,255,255,0.02)",borderRadius:14,border:`1px solid ${T.border}`}}>
+                      {/* Confiança dos dados */}
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"8px 12px",background:`rgba(${analysis.confidenceLabel==="Alta"?"56,211,159":analysis.confidenceLabel==="Média"?"245,166,35":analysis.confidenceLabel==="Baixa"?"255,83,112":"120,120,120"},0.08)`,borderRadius:9,border:`1px solid rgba(${analysis.confidenceLabel==="Alta"?"56,211,159":analysis.confidenceLabel==="Média"?"245,166,35":analysis.confidenceLabel==="Baixa"?"255,83,112":"120,120,120"},0.2)`}}>
+                        <span style={{fontSize:14}}>{analysis.confidenceLabel==="Alta"?"✅":analysis.confidenceLabel==="Média"?"⚠️":"❗"}</span>
+                        <span style={{fontSize:12,fontWeight:600,color:T.text}}>Confiança dos dados: <strong>{analysis.confidenceLabel||"N/D"}</strong></span>
+                        <span style={{fontSize:11,color:T.muted,marginLeft:4}}>— baseado no volume de jogos analisados</span>
+                      </div>
+
+                      {/* Posição na tabela */}
+                      {analysis.standings&&(
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>🏆 Classificação</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                            {[[f.homeTeam?.name,analysis.standings.homePos,analysis.standings.homePoints,analysis.standings.homeGD,T.green],[f.awayTeam?.name,analysis.standings.awayPos,analysis.standings.awayPoints,analysis.standings.awayGD,T.blue]].map(([name,pos,pts,gd,color])=>(
+                              <div key={name} style={{padding:"10px 14px",background:"rgba(255,255,255,0.025)",borderRadius:10,border:`1px solid ${T.border}`}}>
+                                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{name}</div>
+                                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                                  <div><div style={{fontSize:9,color:T.muted}}>POS</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color}}>{pos}º</div></div>
+                                  <div><div style={{fontSize:9,color:T.muted}}>PTS</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:T.text}}>{pts}</div></div>
+                                  <div><div style={{fontSize:9,color:T.muted}}>SG</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:gd>=0?T.green:T.red}}>{gd>0?"+":""}{gd}</div></div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* H2H */}
+                      {analysis.h2h&&(
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>⚔️ Histórico de Confrontos (H2H)</div>
+                          <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                            {[[`${f.homeTeam?.name} venceu`,analysis.h2h.homeWins,T.green],["Empates",analysis.h2h.draws,T.gold],[`${f.awayTeam?.name} venceu`,analysis.h2h.awayWins,T.blue],["Gols/jogo",analysis.h2h.avgGoals,T.text]].map(([l,v,c])=>(
+                              <div key={l} style={{flex:1,minWidth:80,padding:"8px 12px",background:"rgba(255,255,255,0.025)",borderRadius:9,border:`1px solid ${T.border}`,textAlign:"center"}}>
+                                <div style={{fontSize:9,color:T.muted,marginBottom:3}}>{l}</div>
+                                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                            {analysis.h2h.results.map((r,i)=>(
+                              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:"rgba(255,255,255,0.015)",borderRadius:7}}>
+                                <span style={{fontSize:10,color:T.muted,minWidth:80}}>{r.date}</span>
+                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:T.text}}>{r.score}</span>
+                                <span style={{fontSize:11,color:r.winner==="D"?T.gold:r.winner==="H"?T.green:T.blue}}>{r.winner==="D"?"Empate":r.winner==="H"?f.homeTeam?.name+" venceu":f.awayTeam?.name+" venceu"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Forma casa/fora */}
+                      {(analysis.homeFormHome?.length||analysis.awayFormAway?.length)&&(
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>🏠 Forma Específica Casa/Fora</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                            {[[f.homeTeam?.name+" em casa",analysis.homeFormHome,T.green],[f.awayTeam?.name+" fora",analysis.awayFormAway,T.blue]].map(([label,form,color])=>(
+                              <div key={label} style={{padding:"10px 14px",background:"rgba(255,255,255,0.025)",borderRadius:10,border:`1px solid ${T.border}`}}>
+                                <div style={{fontSize:11,color:T.muted,marginBottom:6}}>{label} (últ. 5)</div>
+                                <div style={{display:"flex",gap:4}}>{(form||[]).map((r,i)=><span key={i} style={{width:24,height:24,borderRadius:4,background:r==="W"?T.greenDim:r==="L"?T.redDim:"rgba(245,166,35,0.15)",border:`1px solid ${r==="W"?T.borderG:r==="L"?"rgba(255,83,112,0.3)":"rgba(245,166,35,0.3)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:r==="W"?T.green:r==="L"?T.red:T.gold}}>{r}</span>)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {hs&&as_&&(
                         <div style={{marginBottom:16}}>
                           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Estatísticas Comparativas</div>
