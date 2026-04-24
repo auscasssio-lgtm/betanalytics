@@ -701,17 +701,25 @@ export default function App(){
       if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
 
       // Fase 4: gerar Combinada Sugerida automaticamente
-      // Pega o melhor mercado de cada jogo (máx 4 jogos, min 2)
-      // Critério: EV positivo, mercados de jogos diferentes, odd entre 1.50 e 3.50
+      // Critério DIFERENTE da Chance Lucrativa:
+      // Combinada = mercados SEGUROS (prob alta, odd moderada) de jogos diferentes
+      // Chance Lucrativa = mercado único de alto valor/risco
       if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
         const selecoes=[];
-        // Ordena jogos por valueScore e pega o melhor mercado de cada um
         const jogosOrdenados=[...allResults].sort((a,b)=>b.valueScore-a.valueScore);
         for(const r of jogosOrdenados){
           if(selecoes.length>=4)break;
+          // Para combinadas: mercados seguros — prob alta (55%+), odd entre 1.40-2.20
+          // Prioriza: Dupla Chance, Over 2.5, BTTS com alta probabilidade
           const melhorMercado=r.markets
-            .filter(m=>m.ev>0&&m.odd>=1.40&&m.odd<=3.50&&m.prob>=45&&m.cat!=="Escanteios")
-            .sort((a,b)=>b.ev-a.ev)[0];
+            .filter(m=>
+              m.ev>=0 &&           // EV positivo ou neutro
+              m.odd>=1.35 &&       // Odd mínima para valer combinar
+              m.odd<=2.20 &&       // Odd máxima — não muito arriscado
+              m.prob>=55 &&        // Probabilidade alta — mercado seguro
+              m.cat!=="Escanteios" // Escanteios têm muita variância
+            )
+            .sort((a,b)=>b.prob-a.prob)[0]; // Ordena por maior probabilidade (mais seguro)
           if(melhorMercado){
             selecoes.push({
               marketId:`${r.fixture.homeTeam?.id}-${melhorMercado.name}`,
@@ -1399,14 +1407,22 @@ export default function App(){
             if(combinadas.length<2){setCombErr("Adicione pelo menos 2 seleções.");return;}
             setLoadingComb(true);setCombErr("");setCombAnalysis(null);
             const sels=combinadas.map(c=>`• ${c.match} — ${c.market} @ ${c.odd?.toFixed(2)} (Prob ${c.prob}%, EV ${c.ev>0?"+":""}${c.ev})`).join("\n");
-            const prompt=`Você é analista profissional de apostas. Analise esta aposta combinada e responda APENAS JSON válido.
+            const prompt=`Você é analista profissional de apostas especializado em apostas combinadas conservadoras. Analise esta combinada e responda APENAS JSON válido.
+
+IMPORTANTE: Esta combinada foi construída com mercados de ALTA PROBABILIDADE (55%+) e odds MODERADAS (1.35-2.20) de jogos DIFERENTES. O objetivo é segurança com retorno razoável, não alto risco.
 
 SELEÇÕES (${combinadas.length} jogos):
 ${sels}
 
 ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% | EV COMBINADO: ${combEV>0?"+":""}${combEV.toFixed(3)}
 
-{"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-2%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto"}`;
+CRITÉRIO DE AVALIAÇÃO:
+- Combinada com prob > 30% e odd > 2.0 = boa oportunidade
+- Prob > 20% e odd > 3.0 = aceitável
+- Avalie cada seleção pelo seu mérito individual
+- Se os mercados são sólidos individualmente, a combinada tem valor
+
+{"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-3%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto e prático"}`;
             try{
               const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":gptKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content:prompt},{role:"assistant",content:"{"}]})});
               const data=await r.json();
