@@ -1874,6 +1874,8 @@ CRITÉRIO DE AVALIAÇÃO:
                     ))}
                   </div>
                 </Card>
+                <Card>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>💰 Banca Inicial</div>
                   <div style={{display:"flex",gap:12,alignItems:"center"}}>
                     <input type="number" value={bankroll} onChange={e=>{const v=Number(e.target.value);try{localStorage.setItem("bta_bank",v)}catch{};}} style={{flex:1,background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 13px",color:T.text,fontSize:16,outline:"none"}}/>
                     <select value={currency.code} onChange={e=>{const c=CURRENCIES.find(c=>c.code===e.target.value);if(c){try{localStorage.setItem("bta_curr",JSON.stringify(c))}catch{}}}} style={{background:"rgba(255,255,255,0.05)",border:`1px solid ${T.border}`,borderRadius:9,padding:"10px 12px",color:T.text,fontSize:13,outline:"none"}}>
