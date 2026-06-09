@@ -26,6 +26,8 @@ const LEAGUES=[
   {code:"CL", name:"Champions",      country:"Europe",      flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
   {code:"CLI",name:"Libertadores",   country:"Sul-América", flag:"🏆",oddsKey:"soccer_conmebol_libertadores"},
   {code:"CSA",name:"Sul-Americana",  country:"Sul-América", flag:"🌎",oddsKey:"soccer_conmebol_sudamericana"},
+  {code:"WC", name:"Copa do Mundo",  country:"Fifa",        flag:"🏆",oddsKey:"soccer_fifa_world_cup"},
+  {code:"INTF",name:"Amistosos Int.",country:"Mundo",       flag:"🤝",oddsKey:"soccer_friendly_international"}
 ];
 const CURRENCIES=[{code:"BRL",symbol:"R$"},{code:"USD",symbol:"$"},{code:"EUR",symbol:"€"}];
 const FIB=[1,1,2,3,5,8,13,21,34,55];
