@@ -1788,7 +1788,7 @@ CRITÉRIO DE AVALIAÇÃO:
             )}
           </div>
           );
-        })()}
+        })
 
         {/* ══ BANCA ══ */}
         {tab==="banca"&&(
