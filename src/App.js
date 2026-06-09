@@ -110,38 +110,33 @@ async function oddsFetch(path, key) {
   return r.json();
 }
 
-async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, anthropicKey, h2h, standings, homeFormHome, awayFormAway, confidenceLabel) {
+async function geminiAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, apiKey, h2h, standings, homeFormHome, awayFormAway, confidenceLabel) {
   const top = (markets || []).filter(m => m.rec === "APOSTAR" && m.cat !== "Escanteios").slice(0, 3);
   const cornerMarkets = (markets || []).filter(m => m.cat === "Escanteios").slice(0, 3);
   const fmtM = m => `• ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | ${m.justif}`;
 
-  // H2H summary
   const h2hText = h2h ? `
 H2H (últimos ${h2h.matches} confrontos diretos):
 - ${fixture.homeTeam?.name} venceu: ${h2h.homeWins}x | Empates: ${h2h.draws}x | ${fixture.awayTeam?.name} venceu: ${h2h.awayWins}x
 - Média de gols por jogo: ${h2h.avgGoals}
 - Últimos resultados: ${h2h.results.map(r=>`${r.date} ${r.score} (${r.winner==="D"?"Empate":r.winner==="H"?fixture.homeTeam?.name+" venceu":fixture.awayTeam?.name+" venceu"})`).join(" | ")}` : "H2H: Dados não disponíveis";
 
-  // Standings summary
   const standText = standings ? `
 POSIÇÃO NA TABELA (${standings.totalTeams} times):
 - ${fixture.homeTeam?.name}: ${standings.homePos}º lugar | ${standings.homePoints} pts | Saldo de gols: ${standings.homeGD>0?"+":""}${standings.homeGD}
 - ${fixture.awayTeam?.name}: ${standings.awayPos}º lugar | ${standings.awayPoints} pts | Saldo de gols: ${standings.awayGD>0?"+":""}${standings.awayGD}` : "Classificação: Dados não disponíveis";
 
-  // Home/Away form
   const formText = `
 FORMA RECENTE ESPECÍFICA:
-- ${fixture.homeTeam?.name} em casa (últimos 5): ${homeFormHome?.join(" ") || "N/D"} | Gols/jogo em casa: ${homeFormHome ? (homeFormHome.filter(r=>r!=="?").length > 0 ? "calculado" : "N/D") : "N/D"}
+- ${fixture.homeTeam?.name} em casa (últimos 5): ${homeFormHome?.join(" ") || "N/D"}
 - ${fixture.awayTeam?.name} fora (últimos 5): ${awayFormAway?.join(" ") || "N/D"}`;
 
-  const prompt = `Você é analista sênior de apostas esportivas com 15 anos de experiência. Analise ESTA partida com TODOS os dados disponíveis.
-
+  const prompt = `Você é analista sênior de apostas esportivas. Analise ESTA partida com TODOS os dados disponíveis.
 PARTIDA: ${fixture.homeTeam?.name} x ${fixture.awayTeam?.name} | ${leagueName} | ${dateStr}
-CONFIANÇA DOS DADOS: ${confidenceLabel||"N/D"} — use isso para calibrar sua análise
 
-ESTATÍSTICAS DA TEMPORADA:
-CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}% | Forma: ${homeStats?.form?.join(" ")||"N/D"}
-VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}% | Forma: ${awayStats?.form?.join(" ")||"N/D"}
+ESTATÍSTICAS:
+CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}%
+VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}%
 ${formText}
 ${standText}
 ${h2hText}
@@ -149,31 +144,22 @@ ${h2hText}
 MERCADOS EV+: ${top.map(fmtM).join("\n")||"Nenhum"}
 ESCANTEIOS: ${cornerMarkets.map(fmtM).join("\n")||"N/D"}
 
-INSTRUÇÃO: Use o H2H e a posição na tabela para refinar as probabilidades. Um time em 1º contra um em último tem dinâmica diferente. O histórico de confrontos diretos revela padrões importantes. NÃO repita sempre os mesmos mercados.
+Responda EXCLUSIVAMENTE em JSON usando estas chaves e NENHUM texto adicional fora do JSON:
+{"resumo":"2-3 frases incluindo contexto","analise_casa":"análise casa","analise_visitante":"análise visitante","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/Dominância Casa/etc","placar_provavel":"X-Y","placar_justificativa":"baseada em estatísticas","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR/ANALISAR/EVITAR","risco":"Baixo/Médio/Alto","justificativa":"texto","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"texto explicativo","segunda_opcao":"nome","segunda_opcao_justificativa":"texto","alertas":["alerta 1"],"conclusao":"texto"}`;
 
-{"resumo":"2-3 frases incluindo contexto de tabela e H2H","analise_casa":"análise com forma em casa e posição","analise_visitante":"análise com forma fora e posição","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/Dominância Casa/etc","placar_provavel":"X-Y","placar_justificativa":"baseada em H2H e forma recente","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR","risco":"Baixo","justificativa":"para este jogo com contexto H2H","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"2-3 frases com H2H e tabela","segunda_opcao":"nome","segunda_opcao_justificativa":"1-2 frases","alertas":["alerta específico"],"conclusao":"conselho final mencionando posição na tabela e H2H"}`;
-
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2500,
-      messages: [
-        { role: "user", content: prompt },
-        { role: "assistant", content: "{" }
-      ],
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
     }),
   });
+
   if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 200)); }
   const data = await r.json();
-  const text = data.content?.[0]?.text || "";
-  return JSON.parse(("{" + text).replace(/```json|```/g, "").trim());
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  return JSON.parse(text);
 }
 
 /* ═══════════════════════════════════════════ ANALYSIS ENGINE */
@@ -1639,12 +1625,21 @@ CRITÉRIO DE AVALIAÇÃO:
 
 {"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-3%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto e prático"}`;
             try{
-              const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":gptKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content:prompt},{role:"assistant",content:"{"}]})});
-              const data=await r.json();
-              const text=data.content?.[0]?.text||"";
-              setCombAnalysis(JSON.parse(("{"+text).replace(/```json|```/g,"").trim()));
+              const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${gptKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  generationConfig: { responseMimeType: "application/json" }
+                })
+              });
+              
+              if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 150)); }
+              const data = await r.json();
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+              setCombAnalysis(JSON.parse(text));
             }catch(e){setCombErr("Erro IA: "+e.message);}
-            finally{setLoadingComb(false);}
+            finally{setLoadingComb(false)
           };
 
           const registrarCombinada=()=>{
