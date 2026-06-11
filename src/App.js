@@ -170,6 +170,70 @@ function parseStatsFD(resp,teamId){
   const n=matches.length;
   return{ppg:+((w*3+d)/n).toFixed(2),goalsFor:+(gf/n).toFixed(2),goalsAgainst:+(ga/n).toFixed(2),winRateHome:ph?Math.round(wh/ph*100):0,winRateAway:pa?Math.round(wa/pa*100):0,btts:Math.round(btts/n*100),played:n,form:matches.slice(-5).map(m=>{const isH=m.homeTeam?.id===teamId;const gs=isH?(m.score?.fullTime?.home||0):(m.score?.fullTime?.away||0);const gc=isH?(m.score?.fullTime?.away||0):(m.score?.fullTime?.home||0);return gs>gc?"W":gs===gc?"D":"L";})};
 }
+/* ═══════════════════════════════════════════ POISSON ENGINE (gols) */
+// Probabilidade de exatamente k eventos dado lambda médio
+function poissonPmf(k, lambda) {
+  let fact = 1;
+  for (let i = 2; i <= k; i++) fact *= i;
+  return (Math.pow(lambda, k) * Math.exp(-lambda)) / fact;
+}
+
+// Média de gols/jogo por liga (marcados pelo MANDANTE e VISITANTE).
+// Base histórica 2023-2025 — usada para calcular força relativa.
+const LEAGUE_GOAL_AVG = {
+  BSA:{home:1.45,away:1.05}, PL:{home:1.65,away:1.30}, PD:{home:1.55,away:1.15},
+  SA:{home:1.50,away:1.10}, BL1:{home:1.75,away:1.40}, FL1:{home:1.55,away:1.15},
+  CL:{home:1.60,away:1.25}, CLI:{home:1.60,away:1.05}, CSA:{home:1.50,away:1.05},
+  WC:{home:1.45,away:1.15},
+};
+
+// Constrói a matriz de placares (0..maxGoals) e deriva os mercados de gols
+function buildGoalMatrix(lambdaHome, lambdaAway, maxGoals = 8) {
+  let pHome = 0, pDraw = 0, pAway = 0;
+  let pOver15 = 0, pOver25 = 0, pOver35 = 0, pBtts = 0;
+  for (let h = 0; h <= maxGoals; h++) {
+    for (let a = 0; a <= maxGoals; a++) {
+      const p = poissonPmf(h, lambdaHome) * poissonPmf(a, lambdaAway);
+      if (h > a) pHome += p; else if (h === a) pDraw += p; else pAway += p;
+      const tot = h + a;
+      if (tot >= 2) pOver15 += p;
+      if (tot >= 3) pOver25 += p;
+      if (tot >= 4) pOver35 += p;
+      if (h >= 1 && a >= 1) pBtts += p;
+    }
+  }
+  // Placar mais provável (para exibição)
+  let best = { h: 0, a: 0, p: 0 };
+  for (let h = 0; h <= 5; h++) for (let a = 0; a <= 5; a++) {
+    const p = poissonPmf(h, lambdaHome) * poissonPmf(a, lambdaAway);
+    if (p > best.p) best = { h, a, p };
+  }
+  const pct = x => Math.round(x * 100);
+  return {
+    home: pct(pHome), draw: pct(pDraw), away: pct(pAway),
+    over25: pct(pOver25), over35: pct(pOver35), under25: pct(1 - pOver25),
+    btts: pct(pBtts), dc1x: pct(pHome + pDraw),
+    scoreLine: `${best.h}-${best.a}`,
+    lambdaHome: +lambdaHome.toFixed(2), lambdaAway: +lambdaAway.toFixed(2),
+  };
+}
+
+// Calcula os lambdas a partir das stats dos times + força relativa da liga
+function computeLambdas(hs, as_, leagueCode) {
+  const lg = LEAGUE_GOAL_AVG[leagueCode] || LEAGUE_GOAL_AVG.BSA;
+  // Médias do time (com fallback seguro)
+  const hgf = hs?.goalsFor || 1.3, hga = hs?.goalsAgainst || 1.3;
+  const agf = as_?.goalsFor || 1.1, aga = as_?.goalsAgainst || 1.3;
+  // Força = desempenho do time ÷ média da liga
+  const attHome = clamp(hgf / lg.home, 0.4, 2.2);   // ataque mandante
+  const defAway = clamp(aga / lg.home, 0.4, 2.2);   // fragilidade defensiva visitante
+  const attAway = clamp(agf / lg.away, 0.4, 2.2);   // ataque visitante
+  const defHome = clamp(hga / lg.away, 0.4, 2.2);   // fragilidade defensiva mandante
+  // Gols esperados = força ataque × fragilidade adversário × média da liga
+  const lambdaHome = clamp(attHome * defAway * lg.home, 0.2, 4.5);
+  const lambdaAway = clamp(attAway * defHome * lg.away, 0.2, 4.5);
+  return { lambdaHome, lambdaAway };
+}
 
 function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
   const hppg=hs?.ppg||1.2,appg=as_?.ppg||1.0;
@@ -177,13 +241,16 @@ function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
   const hwr=hs?.winRateHome||40,awr=as_?.winRateAway||32;
   const hbtts=hs?.btts||50,abtts=as_?.btts||48;
   const totalG=hgf+agf;
-  const hwp=clamp(Math.round(hwr*0.55+(hppg/3)*38+5),10,82);
-  const awp=clamp(Math.round(awr*0.50+(appg/3)*33),8,72);
-  const dwp=clamp(100-hwp-awp,10,38);
-  const o25=clamp(Math.round(totalG>=3?72:totalG>=2.5?58:40),25,84);
-  const o35=clamp(Math.round(totalG>=3.5?60:totalG>=3?44:26),14,72);
-  const bttp=clamp(Math.round((hbtts+abtts)/2),20,80);
-  const dc1x=clamp(hwp+dwp,50,95);
+  const { lambdaHome, lambdaAway } = computeLambdas(hs, as_, leagueCode);
+  const gm = buildGoalMatrix(lambdaHome, lambdaAway);
+  const hwp=clamp(gm.home,8,85);
+const awp=clamp(gm.away,6,75);
+const dwp=clamp(gm.draw,8,42);
+const o25=clamp(gm.over25,15,90);
+const o35=clamp(gm.over35,8,78);
+const bttp=clamp(Math.round(gm.btts*0.6+((hbtts+abtts)/2)*0.4),18,82);
+const dc1x=clamp(gm.dc1x,50,96);
+
 
   // Escanteios — usa médias históricas da liga + estilo ofensivo dos times
   const cs=CORNER_STATS[leagueCode]||CORNER_STATS.BSA;
