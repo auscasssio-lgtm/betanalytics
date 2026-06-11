@@ -704,98 +704,136 @@ export default function App(){
     finally{setLoadingLive(false);}
   },[fdKey]);
 
-     /* ── SCANNER ── */
-  const runScanner=useCallback(async()=>{
-    setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);setCombinadadSugerida(null);
-    const ds=fmtISO(scanDate);
-    const leaguesToScan=scanMode==="auto"?LEAGUES:[scanLeague];
-    const allResults=[];
-    let totalMatches=0;
+     
+  /* ── SCANNER (CORRIGIDO) ── */
+const runScanner=useCallback(async()=>{
+  setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);setCombinadadSugerida(null);
+  const ds=fmtISO(scanDate);
+  const leaguesToScan=scanMode==="auto"?LEAGUES:[scanLeague];
+  const allResults=[];
+  let totalMatches=0;
 
-    try{
-      // Fase 1: busca jogos de todas as ligas
-      const leagueMatches=[];
-      for(const league of leaguesToScan){
+  try{
+    // Fase 1: busca jogos de todas as ligas
+    const leagueMatches=[];
+    for(const league of leaguesToScan){
+      try{
+        const data=await fdFetch(`competitions/${league.code}/matches?dateFrom=${ds}&dateTo=${ds}`,fdKey);
+        const matches=(data.matches||[]).slice(0,3); // max 3 por liga p/ não estourar rate limit
+        if(matches.length){leagueMatches.push({league,matches});totalMatches+=matches.length;}
+        await sleep(6500);
+      }catch(e){console.warn(`Skip ${league.code}:`,e.message);}
+    }
+
+    if(!leagueMatches.length){setScanErr("Nenhum jogo encontrado para hoje nessas ligas.");setScanning(false);return;}
+
+    // Fase 2: analisa cada jogo
+    let processed=0;
+    for(const{league,matches}of leagueMatches){
+      let allOdds=[];
+      try{
+        allOdds=await oddsFetch(`sports/${league.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);
+        await sleep(3000);
+      }catch{}
+
+      for(const m of matches){
         try{
-          const data=await fdFetch(`competitions/${league.code}/matches?dateFrom=${ds}&dateTo=${ds}`,fdKey);
-          const matches=(data.matches||[]).slice(0,3); // max 3 por liga para não estourar rate limit
-          if(matches.length){leagueMatches.push({league,matches});totalMatches+=matches.length;}
+          setScanProgress({current:++processed,total:totalMatches,league:league.name});
+
+          const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
           await sleep(6500);
-        }catch(e){console.warn(`Skip ${league.code}:`,e.message);}
+          const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
+          await sleep(6500);
+
+          const hs=parseStatsFD(hr,m.homeTeam.id);
+          const as_=parseStatsFD(ar,m.awayTeam.id);
+
+          const oddsData=Array.isArray(allOdds)
+            ? allOdds.find(o=>(o.home_team||"").toLowerCase().includes((m.homeTeam.name||"").toLowerCase().split(" ")[0]))
+            : null;
+
+          const markets=buildMarkets(hs,as_,oddsData,league.code);
+
+          // ── CORREÇÃO 1: flags de confiabilidade ──
+          const dataMissing=!hs||!as_;
+          const hasRealOdds=markets.some(mk=>mk.hasRealOdd);
+          const noRealOdds=!hasRealOdds;
+
+          // ── CORREÇÃO 2: valueScore com fallback Poisson ──
+          const valueScore=calcValueScore(markets,hasRealOdds);
+
+          // DEBUG opcional (remova depois de validar)
+          console.log(`[${m.homeTeam.name} x ${m.awayTeam.name}]`,{
+            homeStats:hs?"OK":"NULL",
+            awayStats:as_?"OK":"NULL",
+            oddsReais:oddsData?.bookmakers?.length||0,
+            valueScore
+          });
+
+          allResults.push({
+            fixture:m,hs,as_,markets,valueScore,
+            dataMissing,        // ⬅️ NOVO
+            noRealOdds,         // ⬅️ NOVO
+            bestMarkets:markets.filter(mk=>mk.rec==="APOSTAR"&&mk.ev>0),
+            hasOdds:!!oddsData,
+            league
+          });
+          setScanResults([...allResults].sort((a,b)=>b.valueScore-a.valueScore));
+        }catch(e){console.warn("Scanner skip:",e.message);}
       }
+    }
 
-      if(!leagueMatches.length){setScanErr("Nenhum jogo encontrado para hoje nessas ligas.");setScanning(false);return;}
-
-      // Fase 2: analisa cada jogo
-      let processed=0;
-      for(const{league,matches}of leagueMatches){
-        let allOdds=[];
-        try{allOdds=await oddsFetch(`sports/${league.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);await sleep(3000);}catch{}
-
-        for(const m of matches){
-          try{
-            setScanProgress({current:++processed,total:totalMatches,league:league.name});
-            const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
-            await sleep(6500);
-            const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
-            await sleep(6500);
-            const hs=parseStatsFD(hr,m.homeTeam.id);
-            const as_=parseStatsFD(ar,m.awayTeam.id);
-            const oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((m.homeTeam.name||"").toLowerCase().split(" ")[0])):null;
-            const markets=buildMarkets(hs,as_,oddsData,league.code);
-            const valueScore=calcValueScore(markets);
-            allResults.push({fixture:m,hs,as_,markets,valueScore,bestMarkets:markets.filter(mk=>mk.rec==="APOSTAR"&&mk.ev>0),hasOdds:!!oddsData,league});
-            setScanResults([...allResults].sort((a,b)=>b.valueScore-a.valueScore));
-          }catch(e){console.warn("Scanner skip:",e.message);}
+    // Fase 3: detectar Chance Lucrativa (só com odds reais — evita falso-positivo)
+    const luckyBets=[];
+    allResults.forEach(r=>{
+      if(r.dataMissing||r.noRealOdds)return; // ⬅️ ignora jogos sem dados/odds confiáveis
+      r.markets.forEach(m=>{
+        if(m.hasRealOdd&&m.ev>0&&m.odd>=2.50&&m.prob>=28&&m.prob<=65){
+          luckyBets.push({...m,fixture:r.fixture,league:r.league,lucroEsperado:+(m.ev*100).toFixed(1)});
         }
-      }
-
-      // Fase 3: detectar Chance Lucrativa
-      const luckyBets=[];
-      allResults.forEach(r=>{
-        r.markets.forEach(m=>{
-          if(m.ev>0&&m.odd>=2.50&&m.prob>=28&&m.prob<=65){
-            luckyBets.push({...m,fixture:r.fixture,league:r.league,lucroEsperado:+(m.ev*100).toFixed(1)});
-          }
-        });
       });
-      luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
-      if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
+    });
+    luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
+    if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
 
-      // Fase 4: gerar Combinada Sugerida automaticamente
-      if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
-        const selecoes=[];
-        const jogosOrdenados=[...allResults].sort((a,b)=>b.valueScore-a.valueScore);
-        for(const r of jogosOrdenados){
-          if(selecoes.length>=4)break;
-          const melhorMercado=r.markets
-            .filter(m=>m.ev>0&&m.odd>=1.40&&m.odd<=3.50&&m.prob>=45&&m.cat!=="Escanteios")
-            .sort((a,b)=>b.ev-a.ev)[0];
-          if(melhorMercado){
-            selecoes.push({
-              marketId:`${r.fixture.homeTeam?.id}-${melhorMercado.name}`,
-              match:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,
-              market:melhorMercado.name,
-              odd:melhorMercado.odd,
-              prob:melhorMercado.prob,
-              ev:melhorMercado.ev,
-              league:r.league?.name,
-              leagueFlag:r.league?.flag,
-              justif:melhorMercado.justif
-            });
-          }
-        }
-        if(selecoes.length>=2){
-          const oddComb=+selecoes.reduce((acc,s)=>acc*s.odd,1).toFixed(2);
-          const probComb=+(selecoes.reduce((acc,s)=>acc*(s.prob/100),1)*100).toFixed(1);
-          const evComb=+((probComb/100)*oddComb-1).toFixed(3);
-          setCombinadadSugerida({selecoes,oddComb,probComb,evComb,geradaEm:new Date().toLocaleTimeString("pt-BR")});
+    // Fase 4: gerar Combinada Sugerida (só jogos confiáveis)
+    if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
+      const selecoes=[];
+      const jogosOrdenados=[...allResults]
+        .filter(r=>!r.dataMissing)              // ⬅️ exclui jogos sem stats
+        .sort((a,b)=>b.valueScore-a.valueScore);
+      for(const r of jogosOrdenados){
+        if(selecoes.length>=4)break;
+        const melhorMercado=r.markets
+          .filter(m=>m.ev>0&&m.odd>=1.40&&m.odd<=3.50&&m.prob>=45&&m.cat!=="Escanteios")
+          .sort((a,b)=>b.ev-a.ev)[0];
+        if(melhorMercado){
+          selecoes.push({
+            marketId:`${r.fixture.homeTeam?.id}-${melhorMercado.name}`,
+            match:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,
+            market:melhorMercado.name,
+            odd:melhorMercado.odd,
+            prob:melhorMercado.prob,
+            ev:melhorMercado.ev,
+            league:r.league?.name,
+            leagueFlag:r.league?.flag,
+            justif:melhorMercado.justif
+          });
         }
       }
+      if(selecoes.length>=2){
+        const oddComb=+selecoes.reduce((acc,s)=>acc*s.odd,1).toFixed(2);
+        const probComb=+(selecoes.reduce((acc,s)=>acc*(s.prob/100),1)*100).toFixed(1);
+        const evComb=+((probComb/100)*oddComb-1).toFixed(3);
+        setCombinadadSugerida({selecoes,oddComb,probComb,evComb,geradaEm:new Date().toLocaleTimeString("pt-BR")});
+      }
+    }
 
-      if(!allResults.length)setScanErr("Não foi possível analisar os jogos. Verifique sua chave.");
-    }catch(e){setScanErr("Erro: "+e.message);}finally{setScanning(false);setScanProgress({current:0,total:0,league:""});}
-  },[fdKey,oddsKey,scanLeague,scanDate,scanMode]);
+    if(!allResults.length)setScanErr("Não foi possível analisar os jogos. Verifique sua chave.");
+  }catch(e){setScanErr("Erro: "+e.message);}
+  finally{setScanning(false);setScanProgress({current:0,total:0,league:""});}
+},[fdKey,oddsKey,scanLeague,scanDate,scanMode]);
+
 
 
   /* ── AGENDA SEMANAL ── */
