@@ -26,8 +26,6 @@ const LEAGUES=[
   {code:"CL", name:"Champions",      country:"Europe",      flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
   {code:"CLI",name:"Libertadores",   country:"Sul-América", flag:"🏆",oddsKey:"soccer_conmebol_libertadores"},
   {code:"CSA",name:"Sul-Americana",  country:"Sul-América", flag:"🌎",oddsKey:"soccer_conmebol_sudamericana"},
-  {code:"WC", name:"Copa do Mundo",  country:"Fifa",        flag:"🏆",oddsKey:"soccer_fifa_world_cup"},
-  {code:"INTF",name:"Amistosos Int.",country:"Mundo",       flag:"🤝",oddsKey:"soccer_friendly_international"}
 ];
 const CURRENCIES=[{code:"BRL",symbol:"R$"},{code:"USD",symbol:"$"},{code:"EUR",symbol:"€"}];
 const FIB=[1,1,2,3,5,8,13,21,34,55];
@@ -112,56 +110,43 @@ async function oddsFetch(path, key) {
   return r.json();
 }
 
-async function geminiAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, apiKey, h2h, standings, homeFormHome, awayFormAway, confidenceLabel) {
+async function claudeAnalysis(fixture, homeStats, awayStats, markets, leagueName, dateStr, anthropicKey) {
   const top = (markets || []).filter(m => m.rec === "APOSTAR" && m.cat !== "Escanteios").slice(0, 3);
   const cornerMarkets = (markets || []).filter(m => m.cat === "Escanteios").slice(0, 3);
   const fmtM = m => `• ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | ${m.justif}`;
 
-  const h2hText = h2h ? `
-H2H (últimos ${h2h.matches} confrontos diretos):
-- ${fixture.homeTeam?.name} venceu: ${h2h.homeWins}x | Empates: ${h2h.draws}x | ${fixture.awayTeam?.name} venceu: ${h2h.awayWins}x
-- Média de gols por jogo: ${h2h.avgGoals}
-- Últimos resultados: ${h2h.results.map(r=>`${r.date} ${r.score} (${r.winner==="D"?"Empate":r.winner==="H"?fixture.homeTeam?.name+" venceu":fixture.awayTeam?.name+" venceu"})`).join(" | ")}` : "H2H: Dados não disponíveis";
+  const prompt = `Você é analista sênior de apostas. Analise ESTA partida e responda APENAS JSON válido.
 
-  const standText = standings ? `
-POSIÇÃO NA TABELA (${standings.totalTeams} times):
-- ${fixture.homeTeam?.name}: ${standings.homePos}º lugar | ${standings.homePoints} pts | Saldo de gols: ${standings.homeGD>0?"+":""}${standings.homeGD}
-- ${fixture.awayTeam?.name}: ${standings.awayPos}º lugar | ${standings.awayPoints} pts | Saldo de gols: ${standings.awayGD>0?"+":""}${standings.awayGD}` : "Classificação: Dados não disponíveis";
-
-  const formText = `
-FORMA RECENTE ESPECÍFICA:
-- ${fixture.homeTeam?.name} em casa (últimos 5): ${homeFormHome?.join(" ") || "N/D"}
-- ${fixture.awayTeam?.name} fora (últimos 5): ${awayFormAway?.join(" ") || "N/D"}`;
-
-  const prompt = `Você é analista sênior de apostas esportivas. Analise ESTA partida com TODOS os dados disponíveis.
 PARTIDA: ${fixture.homeTeam?.name} x ${fixture.awayTeam?.name} | ${leagueName} | ${dateStr}
-
-ESTATÍSTICAS:
-CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}%
-VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}%
-${formText}
-${standText}
-${h2hText}
-
+CASA: PPG ${homeStats?.ppg||"N/D"} | Gols/J ${homeStats?.goalsFor||"N/D"} | Sofr/J ${homeStats?.goalsAgainst||"N/D"} | Casa% ${homeStats?.winRateHome||"N/D"} | BTTS ${homeStats?.btts||"N/D"}% | Forma: ${homeStats?.form?.join(" ")||"N/D"}
+VISIT: PPG ${awayStats?.ppg||"N/D"} | Gols/J ${awayStats?.goalsFor||"N/D"} | Sofr/J ${awayStats?.goalsAgainst||"N/D"} | Fora% ${awayStats?.winRateAway||"N/D"} | BTTS ${awayStats?.btts||"N/D"}% | Forma: ${awayStats?.form?.join(" ")||"N/D"}
 MERCADOS EV+: ${top.map(fmtM).join("\n")||"Nenhum"}
 ESCANTEIOS: ${cornerMarkets.map(fmtM).join("\n")||"N/D"}
+INSTRUÇÃO: NÃO repita sempre os mesmos mercados. Escolha baseado nos dados DESTE jogo.
 
-Responda EXCLUSIVAMENTE em JSON usando estas chaves e NENHUM texto adicional fora do JSON:
-{"resumo":"2-3 frases incluindo contexto","analise_casa":"análise casa","analise_visitante":"análise visitante","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/Dominância Casa/etc","placar_provavel":"X-Y","placar_justificativa":"baseada em estatísticas","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR/ANALISAR/EVITAR","risco":"Baixo/Médio/Alto","justificativa":"texto","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"texto explicativo","segunda_opcao":"nome","segunda_opcao_justificativa":"texto","alertas":["alerta 1"],"conclusao":"texto"}`;
+{"resumo":"2-3 frases","analise_casa":"análise","analise_visitante":"análise","perfil_jogo":"Defensivo/Ofensivo/Equilibrado/etc","placar_provavel":"X-Y","placar_justificativa":"1-2 frases","escanteios_previsao":"9-11","escanteios_analise":"2 frases","escanteios_aposta":"melhor mercado","mercados":[{"nome":"nome exato","recomendacao":"APOSTAR","risco":"Baixo","justificativa":"para este jogo","confianca":8}],"aposta_principal":"nome","aposta_justificativa":"2-3 frases","segunda_opcao":"nome","segunda_opcao_justificativa":"1-2 frases","alertas":["alerta"],"conclusao":"conselho final"}`;
 
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json" }
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 2500,
+      messages: [
+        { role: "user", content: prompt },
+        { role: "assistant", content: "{" }
+      ],
     }),
   });
-
   if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 200)); }
   const data = await r.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  return JSON.parse(text);
+  const text = data.content?.[0]?.text || "";
+  return JSON.parse(("{" + text).replace(/```json|```/g, "").trim());
 }
 
 /* ═══════════════════════════════════════════ ANALYSIS ENGINE */
@@ -272,7 +257,7 @@ function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
 // Export bookmakers separately for display
 buildMarkets.lastBookmakers=[];
 
-function calcKelly(prob,odd,fraction=0.5){return Math.max(0,(prob/100*(odd-1)-(1-prob/100))/(odd-1))*fraction;}
+function calcKelly(prob,odd){return Math.max(0,(prob/100*(odd-1)-(1-prob/100))/(odd-1));}
 function calcValueScore(markets){const best=markets.filter(m=>m.rec==="APOSTAR"&&m.ev>0);if(!best.length)return 0;return Math.round(Math.max(...best.map(m=>m.ev))*40+Math.max(...best.map(m=>m.score))*6);}
 
 /* ═══════════════════════════════════════════ UI ATOMS */
@@ -332,13 +317,13 @@ function Calendar({selected,onSelect,onClose}){
 }
 
 /* ═══════════════════════════════════════════ MARKET CARD (expansível) */
-function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,kellyFraction=0.5,isInCombinada=false}){
+function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,isInCombinada=false}){
   const[open,setOpen]=useState(false);
   const[customStake,setCustomStake]=useState(null); // null = usar sugestão
   const rs=RS[m.rec];
   const info=MARKET_INFO[m.name]||null;
-  const kelly=calcKelly(m.prob,m.odd,kellyFraction);
-  const kellyStake=+(bankroll*kelly).toFixed(2);
+  const kelly=calcKelly(m.prob,m.odd);
+  const kellyStake=+(bankroll*kelly*0.25).toFixed(2);
   const fixedStake=+(bankroll*0.02).toFixed(2);
   const sugStake=strategy==="kelly"?kellyStake:fixedStake;
   const finalStake=customStake!==null?customStake:sugStake;
@@ -542,17 +527,6 @@ export default function App(){
   const[bancaConfig,setBancaConfig]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_bancacfg")||"{}")}catch{return{}}});
   const saveBancaConfig=c=>{try{localStorage.setItem("bta_bancacfg",JSON.stringify(c))}catch{};setBancaConfig(c);};
   const[bancaSubTab,setBancaSubTab]=useState("resumo");
-
-  // Line Movement — rastrear histórico de odds
-  const[oddsHistory,setOddsHistory]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_oddshistory")||"{}")}catch{return{}}});
-  const saveOddsHistory=h=>{try{localStorage.setItem("bta_oddshistory",JSON.stringify(h))}catch{};setOddsHistory(h);};
-
-  // Backtesting — ROI das recomendações do modelo
-  const[modelBets,setModelBets]=useState(()=>{try{return JSON.parse(localStorage.getItem("bta_modelbets")||"[]")}catch{return[]}});
-  const saveModelBets=b=>{try{localStorage.setItem("bta_modelbets",JSON.stringify(b))}catch{};setModelBets(b);};
-
-  // Kelly fracionado
-  const[kellyFraction,setKellyFraction]=useState(()=>{try{return Number(localStorage.getItem("bta_kellyfrac")||0.5)}catch{return 0.5}});
   const[loadingComb,setLoadingComb]=useState(false);
   const[combAnalysis,setCombAnalysis]=useState(null);
   const[combErr,setCombErr]=useState("");
@@ -611,67 +585,30 @@ export default function App(){
       const calMonth=selDate.getMonth();
       const calendarLeagues=["BSA","MLS","CLI","CSA"];
       const season=calendarLeagues.includes(selLeague.code)?calYear:(calMonth>=7?calYear:calYear-1);
-
-      // Busca histórico dos dois times
-      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=15&status=FINISHED`,fdKey);
+      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
       setAnaStep(2);
-      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=15&status=FINISHED`,fdKey);
+      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       const hs=parseStatsFD(hr,fixture.homeTeam.id);
       const as_=parseStatsFD(ar,fixture.awayTeam.id);
-
-      // Fator Casa/Fora refinado — últimas 5 em casa vs últimas 5 fora
-      const homeMatchesAtHome=(hr.matches||[]).filter(m=>m.homeTeam?.id===fixture.homeTeam.id&&m.status==="FINISHED").slice(0,5);
-      const awayMatchesAway=(ar.matches||[]).filter(m=>m.awayTeam?.id===fixture.awayTeam.id&&m.status==="FINISHED").slice(0,5);
-      const homeFormHome=homeMatchesAtHome.map(m=>{const s=m.score?.fullTime;if(!s)return"?";return s.home>s.away?"W":s.home<s.away?"L":"D";});
-      const awayFormAway=awayMatchesAway.map(m=>{const s=m.score?.fullTime;if(!s)return"?";return s.away>s.home?"W":s.away<s.home?"L":"D";});
-      const homeGoalsHome=homeMatchesAtHome.length?+(homeMatchesAtHome.reduce((a,m)=>a+(m.score?.fullTime?.home||0),0)/homeMatchesAtHome.length).toFixed(2):null;
-      const awayGoalsAway=awayMatchesAway.length?+(awayMatchesAway.reduce((a,m)=>a+(m.score?.fullTime?.away||0),0)/awayMatchesAway.length).toFixed(2):null;
-
-      // Filtro de confiança
-      const confidence=Math.min(100,Math.round(((hs?.played||0)+(as_?.played||0))/24*100));
-      const confidenceLabel=confidence>=75?"Alta":confidence>=50?"Média":confidence>=25?"Baixa":"Insuficiente";
-
-      // H2H — confronto direto
-      let h2h=null;
-      try{
-        await sleep(3500);
-        const h2hData=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season-1}&limit=10&status=FINISHED`,fdKey);
-        const h2hMatches=(h2hData.matches||[]).filter(m=>(m.homeTeam?.id===fixture.homeTeam.id&&m.awayTeam?.id===fixture.awayTeam.id)||(m.homeTeam?.id===fixture.awayTeam.id&&m.awayTeam?.id===fixture.homeTeam.id)).slice(0,5);
-        if(h2hMatches.length>0){
-          const homeWins=h2hMatches.filter(m=>{const s=m.score?.fullTime;if(!s)return false;return(m.homeTeam?.id===fixture.homeTeam.id&&s.home>s.away)||(m.awayTeam?.id===fixture.homeTeam.id&&s.away>s.home);}).length;
-          const draws=h2hMatches.filter(m=>{const s=m.score?.fullTime;return s&&s.home===s.away;}).length;
-          const awayWins=h2hMatches.length-homeWins-draws;
-          const totalGoals=h2hMatches.reduce((a,m)=>{const s=m.score?.fullTime;return a+(s?(s.home+s.away):0);},0);
-          h2h={matches:h2hMatches.length,homeWins,draws,awayWins,avgGoals:+(totalGoals/h2hMatches.length).toFixed(1),results:h2hMatches.slice(0,3).map(m=>{const s=m.score?.fullTime;const isHome=m.homeTeam?.id===fixture.homeTeam.id;return{date:(m.utcDate||"").slice(0,10),score:isHome?`${s?.home}-${s?.away}`:`${s?.away}-${s?.home}`,winner:s?.home===s?.away?"D":isHome?(s?.home>s?.away?"H":"A"):(s?.away>s?.home?"H":"A")};})};
-        }
-      }catch(e){console.warn("H2H error:",e.message);}
-
-      // Posição na tabela
-      let standings=null;
-      try{
-        await sleep(3500);
-        const standData=await fdFetch(`competitions/${selLeague.code}/standings?season=${season}`,fdKey);
-        const table=standData?.standings?.[0]?.table||[];
-        const homePos=table.find(t=>t.team?.id===fixture.homeTeam.id);
-        const awayPos=table.find(t=>t.team?.id===fixture.awayTeam.id);
-        if(homePos&&awayPos)standings={
-          homePos:homePos.position,homePoints:homePos.points,homeGD:homePos.goalDifference,
-          awayPos:awayPos.position,awayPoints:awayPos.points,awayGD:awayPos.goalDifference,
-          totalTeams:table.length
-        };
-      }catch(e){console.warn("Standings error:",e.message);}
-
       let oddsData=null;
       try{const allOdds=await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`,oddsKey);oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((fixture.homeTeam.name||"").toLowerCase().split(" ")[0])):null;}catch{}
       setAnaStep(3);
       const builtMarkets=buildMarkets(hs,as_,oddsData,selLeague.code);
-      const bookmakers=oddsData?.bookmakers?.map(b=>{const bk={name:b.title||b.key};b.markets?.forEach(mkt=>{if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{if(o.name==="Home")bk.home=o.price;if(o.name==="Away")bk.away=o.price;if(o.name==="Draw")bk.draw=o.price;});if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1)bk.over25=o.price;if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1)bk.under25=o.price;});});return bk;}).filter(b=>Object.keys(b).length>1)||[];
-      setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData,bookmakers,h2h,standings,confidence,confidenceLabel,homeFormHome,awayFormAway,homeGoalsHome,awayGoalsAway});
+      // Extrai bookmakers para comparação de odds
+      const bookmakers=oddsData?.bookmakers?.map(b=>{
+        const bk={name:b.title||b.key};
+        b.markets?.forEach(mkt=>{
+          if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{if(o.name==="Home")bk.home=o.price;if(o.name==="Away")bk.away=o.price;if(o.name==="Draw")bk.draw=o.price;});
+          if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1)bk.over25=o.price;if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1)bk.under25=o.price;});
+        });
+        return bk;
+      }).filter(b=>Object.keys(b).length>1)||[];
+      setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData,bookmakers});
       setLoadingGpt(true);
       try{
-        const currentGptKey=localStorage.getItem("bta_gpt")||gptKey;
-        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey,h2h,standings,homeFormHome,awayFormAway,confidenceLabel);
+        const currentGptKey = localStorage.getItem("bta_gpt") || gptKey;
+        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey);
         setGptAnalysis(result);
       }catch(e){setGptErr("Erro IA: "+e.message);}
       finally{setLoadingGpt(false);}
@@ -763,75 +700,18 @@ export default function App(){
       luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
       if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
 
-      // Line Movement — salva snapshot e detecta movimentos de odds
-      const now=Date.now();
-      const newHistory={...oddsHistory};
-      const lineMovements=[];
-      allResults.forEach(r=>{
-        const key=`${r.fixture.homeTeam?.id}-${r.fixture.awayTeam?.id}`;
-        const currentOdds={};
-        r.markets.forEach(m=>{if(m.hasRealOdd)currentOdds[m.name]=m.odd;});
-        if(Object.keys(currentOdds).length>0){
-          const prev=newHistory[key];
-          if(prev?.odds){
-            Object.entries(currentOdds).forEach(([mkt,odd])=>{
-              const prevOdd=prev.odds[mkt];
-              if(prevOdd&&Math.abs(odd-prevOdd)/prevOdd>0.04){
-                const falling=odd<prevOdd;
-                const pct=Math.abs(((odd-prevOdd)/prevOdd)*100).toFixed(1);
-                lineMovements.push({
-                  fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,
-                  league:r.league?.name,leagueFlag:r.league?.flag,
-                  market:mkt,prevOdd:+prevOdd.toFixed(2),currentOdd:+odd.toFixed(2),
-                  direction:falling?"⬇️ Caindo":"⬆️ Subindo",pct,
-                  signal:falling?"💰 Dinheiro profissional entrando":"⚠️ Valor pode estar desaparecendo"
-                });
-              }
-            });
-          }
-          newHistory[key]={odds:currentOdds,ts:now,fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`};
-        }
-      });
-      saveOddsHistory(newHistory);
-      if(lineMovements.length>0){
-        // Adiciona line movements ao primeiro resultado para exibir
-        setScanResults(prev=>{const updated=[...prev];if(updated[0])updated[0]={...updated[0],lineMovements};return updated;});
-      }
-      // Salva variável para exibir separado
-      if(lineMovements.length>0)window._betaLineMovements=lineMovements;
-
-      // Backtesting — registra recomendações do modelo para avaliar ROI depois
-      const newModelBets=[...modelBets];
-      allResults.forEach(r=>{
-        r.markets.filter(m=>m.rec==="APOSTAR"&&m.ev>0).slice(0,1).forEach(m=>{
-          const bkey=`${r.fixture.homeTeam?.id}-${r.fixture.awayTeam?.id}-${m.name}-${fmtISO(scanDate)}`;
-          if(!newModelBets.find(b=>b.key===bkey)){
-            newModelBets.unshift({key:bkey,date:fmtISO(scanDate),fixture:`${r.fixture.homeTeam?.name} x ${r.fixture.awayTeam?.name}`,market:m.name,odd:m.odd,prob:m.prob,ev:m.ev,league:r.league?.name,result:"PENDENTE"});
-          }
-        });
-      });
-      saveModelBets(newModelBets.slice(0,300));
-
       // Fase 4: gerar Combinada Sugerida automaticamente
-      // Critério DIFERENTE da Chance Lucrativa:
-      // Combinada = mercados SEGUROS (prob alta, odd moderada) de jogos diferentes
-      // Chance Lucrativa = mercado único de alto valor/risco
+      // Pega o melhor mercado de cada jogo (máx 4 jogos, min 2)
+      // Critério: EV positivo, mercados de jogos diferentes, odd entre 1.50 e 3.50
       if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
         const selecoes=[];
+        // Ordena jogos por valueScore e pega o melhor mercado de cada um
         const jogosOrdenados=[...allResults].sort((a,b)=>b.valueScore-a.valueScore);
         for(const r of jogosOrdenados){
           if(selecoes.length>=4)break;
-          // Para combinadas: mercados seguros — prob alta (55%+), odd entre 1.40-2.20
-          // Prioriza: Dupla Chance, Over 2.5, BTTS com alta probabilidade
           const melhorMercado=r.markets
-            .filter(m=>
-              m.ev>=0 &&           // EV positivo ou neutro
-              m.odd>=1.35 &&       // Odd mínima para valer combinar
-              m.odd<=2.20 &&       // Odd máxima — não muito arriscado
-              m.prob>=55 &&        // Probabilidade alta — mercado seguro
-              m.cat!=="Escanteios" // Escanteios têm muita variância
-            )
-            .sort((a,b)=>b.prob-a.prob)[0]; // Ordena por maior probabilidade (mais seguro)
+            .filter(m=>m.ev>0&&m.odd>=1.40&&m.odd<=3.50&&m.prob>=45&&m.cat!=="Escanteios")
+            .sort((a,b)=>b.ev-a.ev)[0];
           if(melhorMercado){
             selecoes.push({
               marketId:`${r.fixture.homeTeam?.id}-${melhorMercado.name}`,
@@ -1040,32 +920,6 @@ export default function App(){
                     💡 <strong>Por que é lucrativa:</strong> A odd {luckyBet.odd?.toFixed(2)} implica probabilidade de {(100/luckyBet.odd).toFixed(0)}%, mas nosso modelo estima {luckyBet.prob}% de chance real — uma diferença de +{(luckyBet.prob-100/luckyBet.odd).toFixed(0)}pp que representa valor real.
                     <span style={{color:T.muted}}> Aposte apenas o que está disposto a perder.</span>
                   </div>
-                </div>
-              )}
-
-              {/* ── LINE MOVEMENT ── */}
-              {!scanning&&window._betaLineMovements?.length>0&&(
-                <div style={{marginBottom:16,padding:"14px 18px",background:"linear-gradient(135deg,rgba(78,201,240,0.08),rgba(12,16,24,1))",border:"1px solid rgba(78,201,240,0.25)",borderRadius:14}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                    <span style={{fontSize:16}}>📊</span>
-                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:T.blue}}>Line Movement Detectado</span>
-                    <span style={{fontSize:10,color:T.muted}}>— odds mudaram desde o último scan</span>
-                  </div>
-                  {window._betaLineMovements.slice(0,5).map((lm,i)=>(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"rgba(78,201,240,0.05)",borderRadius:8,marginBottom:5,flexWrap:"wrap"}}>
-                      <span style={{fontSize:12}}>{lm.leagueFlag}</span>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:11,color:T.muted}}>{lm.fixture}</div>
-                        <div style={{fontSize:12,fontWeight:600,color:T.text}}>{lm.market}</div>
-                      </div>
-                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                        <span style={{fontSize:12,color:T.muted,textDecoration:"line-through"}}>{lm.prevOdd}</span>
-                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:800,color:lm.direction.includes("Caindo")?T.green:T.red}}>{lm.currentOdd}</span>
-                        <span style={{fontSize:11,fontWeight:700,color:lm.direction.includes("Caindo")?T.green:T.red}}>{lm.direction} {lm.pct}%</span>
-                      </div>
-                      <div style={{fontSize:10,color:lm.direction.includes("Caindo")?T.green:T.gold,width:"100%",marginTop:2}}>{lm.signal}</div>
-                    </div>
-                  ))}
                 </div>
               )}
 
@@ -1364,71 +1218,6 @@ export default function App(){
                   {/* ── DADOS BRUTOS (expansível) ── */}
                   {showRawData&&(
                     <div style={{marginBottom:24,padding:18,background:"rgba(255,255,255,0.02)",borderRadius:14,border:`1px solid ${T.border}`}}>
-                      {/* Confiança dos dados */}
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"8px 12px",background:`rgba(${analysis.confidenceLabel==="Alta"?"56,211,159":analysis.confidenceLabel==="Média"?"245,166,35":analysis.confidenceLabel==="Baixa"?"255,83,112":"120,120,120"},0.08)`,borderRadius:9,border:`1px solid rgba(${analysis.confidenceLabel==="Alta"?"56,211,159":analysis.confidenceLabel==="Média"?"245,166,35":analysis.confidenceLabel==="Baixa"?"255,83,112":"120,120,120"},0.2)`}}>
-                        <span style={{fontSize:14}}>{analysis.confidenceLabel==="Alta"?"✅":analysis.confidenceLabel==="Média"?"⚠️":"❗"}</span>
-                        <span style={{fontSize:12,fontWeight:600,color:T.text}}>Confiança dos dados: <strong>{analysis.confidenceLabel||"N/D"}</strong></span>
-                        <span style={{fontSize:11,color:T.muted,marginLeft:4}}>— baseado no volume de jogos analisados</span>
-                      </div>
-
-                      {/* Posição na tabela */}
-                      {analysis.standings&&(
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>🏆 Classificação</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                            {[[f.homeTeam?.name,analysis.standings.homePos,analysis.standings.homePoints,analysis.standings.homeGD,T.green],[f.awayTeam?.name,analysis.standings.awayPos,analysis.standings.awayPoints,analysis.standings.awayGD,T.blue]].map(([name,pos,pts,gd,color])=>(
-                              <div key={name} style={{padding:"10px 14px",background:"rgba(255,255,255,0.025)",borderRadius:10,border:`1px solid ${T.border}`}}>
-                                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{name}</div>
-                                <div style={{display:"flex",gap:16,alignItems:"center"}}>
-                                  <div><div style={{fontSize:9,color:T.muted}}>POS</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:24,fontWeight:800,color}}>{pos}º</div></div>
-                                  <div><div style={{fontSize:9,color:T.muted}}>PTS</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:T.text}}>{pts}</div></div>
-                                  <div><div style={{fontSize:9,color:T.muted}}>SG</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:gd>=0?T.green:T.red}}>{gd>0?"+":""}{gd}</div></div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* H2H */}
-                      {analysis.h2h&&(
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>⚔️ Histórico de Confrontos (H2H)</div>
-                          <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-                            {[[`${f.homeTeam?.name} venceu`,analysis.h2h.homeWins,T.green],["Empates",analysis.h2h.draws,T.gold],[`${f.awayTeam?.name} venceu`,analysis.h2h.awayWins,T.blue],["Gols/jogo",analysis.h2h.avgGoals,T.text]].map(([l,v,c])=>(
-                              <div key={l} style={{flex:1,minWidth:80,padding:"8px 12px",background:"rgba(255,255,255,0.025)",borderRadius:9,border:`1px solid ${T.border}`,textAlign:"center"}}>
-                                <div style={{fontSize:9,color:T.muted,marginBottom:3}}>{l}</div>
-                                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:800,color:c}}>{v}</div>
-                              </div>
-                            ))}
-                          </div>
-                          <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                            {analysis.h2h.results.map((r,i)=>(
-                              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:"rgba(255,255,255,0.015)",borderRadius:7}}>
-                                <span style={{fontSize:10,color:T.muted,minWidth:80}}>{r.date}</span>
-                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:T.text}}>{r.score}</span>
-                                <span style={{fontSize:11,color:r.winner==="D"?T.gold:r.winner==="H"?T.green:T.blue}}>{r.winner==="D"?"Empate":r.winner==="H"?f.homeTeam?.name+" venceu":f.awayTeam?.name+" venceu"}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Forma casa/fora */}
-                      {(analysis.homeFormHome?.length||analysis.awayFormAway?.length)&&(
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:8}}>🏠 Forma Específica Casa/Fora</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                            {[[f.homeTeam?.name+" em casa",analysis.homeFormHome,T.green],[f.awayTeam?.name+" fora",analysis.awayFormAway,T.blue]].map(([label,form,color])=>(
-                              <div key={label} style={{padding:"10px 14px",background:"rgba(255,255,255,0.025)",borderRadius:10,border:`1px solid ${T.border}`}}>
-                                <div style={{fontSize:11,color:T.muted,marginBottom:6}}>{label} (últ. 5)</div>
-                                <div style={{display:"flex",gap:4}}>{(form||[]).map((r,i)=><span key={i} style={{width:24,height:24,borderRadius:4,background:r==="W"?T.greenDim:r==="L"?T.redDim:"rgba(245,166,35,0.15)",border:`1px solid ${r==="W"?T.borderG:r==="L"?"rgba(255,83,112,0.3)":"rgba(245,166,35,0.3)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:r==="W"?T.green:r==="L"?T.red:T.gold}}>{r}</span>)}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
                       {hs&&as_&&(
                         <div style={{marginBottom:16}}>
                           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Estatísticas Comparativas</div>
@@ -1447,7 +1236,7 @@ export default function App(){
                         {["Mercado","Score","Prob.","Odd","EV","Recomendação",""].map(h=><div key={h} style={{fontSize:9,color:T.muted,textTransform:"uppercase",letterSpacing:1}}>{h}</div>)}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} onAddCombinada={(mk)=>setCombinadas(prev=>{const exists=prev.find(c=>c.marketId===`${f.homeTeam?.id}-${mk.name}`);if(exists)return prev.filter(c=>c.marketId!==`${f.homeTeam?.id}-${mk.name}`);return[...prev,{marketId:`${f.homeTeam?.id}-${mk.name}`,match:`${f.homeTeam?.name} x ${f.awayTeam?.name}`,market:mk.name,odd:mk.odd,prob:mk.prob,ev:mk.ev,league:selLeague.name,leagueFlag:selLeague.flag}];})} isInCombinada={!!combinadas.find(c=>c.marketId===`${f.homeTeam?.id}-${m.name}`)} bankroll={bankroll} currency={currency} strategy={preferredStrategy} kellyFraction={kellyFraction}/>)}
+                        {markets.map((m,i)=><MarketCard key={i} m={m} i={i} onRegister={(mk,stake)=>addBet(mk,stake,f)} onAddCombinada={(mk)=>setCombinadas(prev=>{const exists=prev.find(c=>c.marketId===`${f.homeTeam?.id}-${mk.name}`);if(exists)return prev.filter(c=>c.marketId!==`${f.homeTeam?.id}-${mk.name}`);return[...prev,{marketId:`${f.homeTeam?.id}-${mk.name}`,match:`${f.homeTeam?.name} x ${f.awayTeam?.name}`,market:mk.name,odd:mk.odd,prob:mk.prob,ev:mk.ev,league:selLeague.name,leagueFlag:selLeague.flag}];})} isInCombinada={!!combinadas.find(c=>c.marketId===`${f.homeTeam?.id}-${m.name}`)} bankroll={bankroll} currency={currency} strategy={preferredStrategy}/>)}
                       </div>
                       {/* Comparação de Odds por Casa */}
                       {analysis.bookmakers?.length>0&&(
@@ -1610,38 +1399,21 @@ export default function App(){
             if(combinadas.length<2){setCombErr("Adicione pelo menos 2 seleções.");return;}
             setLoadingComb(true);setCombErr("");setCombAnalysis(null);
             const sels=combinadas.map(c=>`• ${c.match} — ${c.market} @ ${c.odd?.toFixed(2)} (Prob ${c.prob}%, EV ${c.ev>0?"+":""}${c.ev})`).join("\n");
-            const prompt=`Você é analista profissional de apostas especializado em apostas combinadas conservadoras. Analise esta combinada e responda APENAS JSON válido.
-
-IMPORTANTE: Esta combinada foi construída com mercados de ALTA PROBABILIDADE (55%+) e odds MODERADAS (1.35-2.20) de jogos DIFERENTES. O objetivo é segurança com retorno razoável, não alto risco.
+            const prompt=`Você é analista profissional de apostas. Analise esta aposta combinada e responda APENAS JSON válido.
 
 SELEÇÕES (${combinadas.length} jogos):
 ${sels}
 
 ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% | EV COMBINADO: ${combEV>0?"+":""}${combEV.toFixed(3)}
 
-CRITÉRIO DE AVALIAÇÃO:
-- Combinada com prob > 30% e odd > 2.0 = boa oportunidade
-- Prob > 20% e odd > 3.0 = aceitável
-- Avalie cada seleção pelo seu mérito individual
-- Se os mercados são sólidos individualmente, a combinada tem valor
-
-{"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-3%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto e prático"}`;
+{"viabilidade":"Alta/Média/Baixa","resumo":"análise geral da combinada em 2-3 frases","analise_selecoes":[{"selecao":"nome do jogo - mercado","avaliacao":"FORTE/OK/FRACA","justificativa":"por que esta seleção é boa ou ruim"}],"elo_fraco":"qual seleção representa maior risco e por que","odd_justa":"odd que refletiria as probabilidades reais, ex: 4.20","value_assessment":"se há valor real nesta combinada","stake_sugerido":"% da banca recomendada (ex: 1-2%)","alertas":["risco específico"],"recomendacao":"APOSTAR/ANALISAR/EVITAR","conclusao":"conselho final direto"}`;
             try{
-              const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${gptKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }],
-                  generationConfig: { responseMimeType: "application/json" }
-                })
-              });
-              
-              if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 150)); }
-              const data = await r.json();
-              const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-              setCombAnalysis(JSON.parse(text));
+              const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":gptKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content:prompt},{role:"assistant",content:"{"}]})});
+              const data=await r.json();
+              const text=data.content?.[0]?.text||"";
+              setCombAnalysis(JSON.parse(("{"+text).replace(/```json|```/g,"").trim()));
             }catch(e){setCombErr("Erro IA: "+e.message);}
-            finally{setLoadingComb(false)
+            finally{setLoadingComb(false);}
           };
 
           const registrarCombinada=()=>{
@@ -1790,14 +1562,14 @@ CRITÉRIO DE AVALIAÇÃO:
             )}
           </div>
           );
-        })
+        })()}
 
         {/* ══ BANCA ══ */}
         {tab==="banca"&&(
           <div>
             {/* Sub-nav Banca */}
             <div style={{display:"flex",gap:6,marginBottom:20,borderBottom:`1px solid ${T.border}`,paddingBottom:14}}>
-              {[["resumo","💰","Resumo"],["gestao","🛡️","Gestão"],["historico","📈","Performance"],["backtesting","🔬","Backtesting"],["apostas","📋","Apostas"],["live","🔴","Live"]].map(([k,ic,lb])=>(
+              {[["resumo","💰","Resumo"],["gestao","🛡️","Gestão"],["historico","📈","Performance"],["apostas","📋","Apostas"],["live","🔴","Live"]].map(([k,ic,lb])=>(
                 <button key={k} onClick={()=>setBancaSubTab(k)} style={{padding:"8px 16px",background:bancaSubTab===k?T.greenDim:"transparent",border:`1px solid ${bancaSubTab===k?T.borderG:T.border}`,borderRadius:9,cursor:"pointer",color:bancaSubTab===k?T.green:T.muted,fontSize:12,fontWeight:bancaSubTab===k?800:400,fontFamily:"'Barlow Condensed',sans-serif",transition:"all 0.2s"}}>{ic} {lb}</button>
               ))}
             </div>
@@ -1851,25 +1623,6 @@ CRITÉRIO DE AVALIAÇÃO:
                       </div>
                     </div>
                   ))}
-                </Card>
-                <Card>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>📐 Kelly Fracionado</div>
-                  <div style={{fontSize:12,color:T.muted,marginBottom:12}}>Apostadores profissionais usam ¼ a ½ Kelly para reduzir variância. Kelly completo (1.0) maximiza retorno mas tem alta volatilidade.</div>
-                  <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10}}>
-                    <input type="range" min="0.1" max="1.0" step="0.05" value={kellyFraction} onChange={e=>{const v=Number(e.target.value);setKellyFraction(v);try{localStorage.setItem("bta_kellyfrac",v)}catch{}}} style={{flex:1,accentColor:T.green}}/>
-                    <div style={{textAlign:"center",minWidth:60}}>
-                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:26,fontWeight:800,color:T.green}}>{(kellyFraction*100).toFixed(0)}%</div>
-                      <div style={{fontSize:9,color:T.muted}}>do Kelly</div>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}>
-                    {[["10%",0.1,"Conservador"],["25%",0.25,"¼ Kelly"],["50%",0.50,"½ Kelly ★"],["75%",0.75,"¾ Kelly"],["100%",1.0,"Kelly Pleno"]].map(([lb,val,desc])=>(
-                      <button key={lb} onClick={()=>{setKellyFraction(val);try{localStorage.setItem("bta_kellyfrac",val)}catch{}}} style={{padding:"5px 8px",background:Math.abs(kellyFraction-val)<0.01?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${Math.abs(kellyFraction-val)<0.01?T.borderG:T.border}`,borderRadius:7,cursor:"pointer",textAlign:"center"}}>
-                        <div style={{fontSize:11,fontWeight:700,color:Math.abs(kellyFraction-val)<0.01?T.green:T.text}}>{lb}</div>
-                        <div style={{fontSize:9,color:T.muted}}>{desc}</div>
-                      </button>
-                    ))}
-                  </div>
                 </Card>
                 <Card>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:T.text,marginBottom:14}}>💰 Banca Inicial</div>
@@ -1964,88 +1717,6 @@ CRITÉRIO DE AVALIAÇÃO:
                     ))}
                   </Card>
                 </div>
-              </div>
-              );
-            })()}
-
-            {/* ── BACKTESTING ── */}
-            {bancaSubTab==="backtesting"&&(()=>{
-              const concluded2=modelBets.filter(b=>b.result!=="PENDENTE");
-              const pending2=modelBets.filter(b=>b.result==="PENDENTE");
-              const wins2=concluded2.filter(b=>b.result==="WIN").length;
-              const totalStaked=concluded2.reduce((s,b)=>s+1,0); // 1 unidade por aposta
-              const totalReturn=concluded2.filter(b=>b.result==="WIN").reduce((s,b)=>s+b.odd,0);
-              const roi=totalStaked>0?+((totalReturn-totalStaked)/totalStaked*100).toFixed(1):0;
-              const avgEv=concluded2.length?+(concluded2.reduce((s,b)=>s+b.ev,0)/concluded2.length).toFixed(3):0;
-              const hitRate=concluded2.length?+(wins2/concluded2.length*100).toFixed(1):0;
-              return(
-              <div>
-                <div style={{marginBottom:16}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:T.text,marginBottom:4}}>🔬 Backtesting — ROI do Modelo</div>
-                  <div style={{fontSize:12,color:T.muted}}>Avalia se as recomendações do sistema têm valor real. Registradas automaticamente pelo scanner.</div>
-                </div>
-                {modelBets.length===0?(
-                  <Card style={{textAlign:"center",padding:52}}>
-                    <div style={{fontSize:36,marginBottom:12}}>🔬</div>
-                    <div style={{fontSize:14,color:T.dim,marginBottom:6}}>Sem dados ainda</div>
-                    <div style={{fontSize:12,color:T.muted}}>Use o Scanner — as apostas recomendadas pelo modelo são registradas automaticamente para análise posterior.</div>
-                  </Card>
-                ):(
-                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    {/* KPIs do modelo */}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-                      {[{l:"Apostas Analisadas",v:concluded2.length,c:T.blue},{l:"Taxa de Acerto",v:hitRate+"%",c:hitRate>=55?T.green:hitRate>=45?T.gold:T.red},{l:"ROI do Modelo",v:(roi>=0?"+":"")+roi+"%",c:roi>=0?T.green:T.red},{l:"EV Médio",v:(avgEv>=0?"+":"")+avgEv,c:avgEv>=0?T.green:T.red}].map(({l,v,c})=>(
-                        <Card key={l} glow={roi>0}>
-                          <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{l}</div>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:800,color:c}}>{v}</div>
-                        </Card>
-                      ))}
-                    </div>
-                    {pending2.length>0&&(
-                      <Card style={{border:"1px solid rgba(245,166,35,0.2)"}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.gold,marginBottom:10}}>⏳ Apostas Pendentes de Resultado ({pending2.length})</div>
-                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                          {pending2.slice(0,10).map((b,i)=>(
-                            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:`1px solid ${T.border}`}}>
-                              <div style={{flex:1}}>
-                                <div style={{fontSize:10,color:T.muted}}>{b.date} · {b.league}</div>
-                                <div style={{fontSize:12,fontWeight:600,color:T.text}}>{b.fixture}</div>
-                                <div style={{fontSize:11,color:T.gold}}>{b.market} @ {b.odd?.toFixed(2)}</div>
-                              </div>
-                              <div style={{display:"flex",gap:5}}>
-                                <button onClick={()=>{const u=[...modelBets];const idx=u.findIndex(x=>x.key===b.key);if(idx>=0){u[idx]={...u[idx],result:"WIN"};saveModelBets(u);}}} style={{padding:"4px 10px",background:T.greenDim,border:`1px solid ${T.borderG}`,borderRadius:6,color:T.green,fontSize:10,fontWeight:700,cursor:"pointer"}}>WIN</button>
-                                <button onClick={()=>{const u=[...modelBets];const idx=u.findIndex(x=>x.key===b.key);if(idx>=0){u[idx]={...u[idx],result:"LOSS"};saveModelBets(u);}}} style={{padding:"4px 10px",background:T.redDim,border:"1px solid rgba(255,83,112,0.3)",borderRadius:6,color:T.red,fontSize:10,fontWeight:700,cursor:"pointer"}}>LOSS</button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </Card>
-                    )}
-                    {concluded2.length>0&&(
-                      <Card>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:T.text,marginBottom:10}}>📊 Histórico do Modelo</div>
-                        <div style={{overflowX:"auto"}}>
-                          <table style={{width:"100%",borderCollapse:"collapse"}}>
-                            <thead><tr>{["Data","Partida","Mercado","Odd","Prob","EV","Resultado"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:0.8,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}</tr></thead>
-                            <tbody>
-                              {concluded2.slice(0,20).map((b,i)=>(
-                                <tr key={i} style={{borderBottom:`1px solid ${T.border}22`}}>
-                                  <td style={{padding:"7px 10px",fontSize:11,color:T.muted}}>{b.date}</td>
-                                  <td style={{padding:"7px 10px",fontSize:11,color:T.text,fontWeight:600}}>{b.fixture}</td>
-                                  <td style={{padding:"7px 10px",fontSize:11,color:T.dim}}>{b.market}</td>
-                                  <td style={{padding:"7px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:T.gold}}>{b.odd?.toFixed(2)}</td>
-                                  <td style={{padding:"7px 10px",fontSize:11,color:T.text}}>{b.prob}%</td>
-                                  <td style={{padding:"7px 10px",fontSize:11,color:b.ev>=0?T.green:T.red}}>{b.ev>=0?"+":""}{b.ev}</td>
-                                  <td style={{padding:"7px 10px"}}><Pill color={b.result==="WIN"?T.green:T.red} size={10}>{b.result}</Pill></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </Card>
-                    )}
-                  </div>
-                )}
               </div>
               );
             })()}
