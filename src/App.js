@@ -26,6 +26,8 @@ const LEAGUES=[
   {code:"CL", name:"Champions",      country:"Europe",      flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
   {code:"CLI",name:"Libertadores",   country:"Sul-América", flag:"🏆",oddsKey:"soccer_conmebol_libertadores"},
   {code:"CSA",name:"Sul-Americana",  country:"Sul-América", flag:"🌎",oddsKey:"soccer_conmebol_sudamericana"},
+  {code:"WC", name:"Copa do Mundo",  country:"Mundo",       flag:"🏆",oddsKey:"soccer_fifa_world_cup"},
+
 ];
 const CURRENCIES=[{code:"BRL",symbol:"R$"},{code:"USD",symbol:"$"},{code:"EUR",symbol:"€"}];
 const FIB=[1,1,2,3,5,8,13,21,34,55];
@@ -43,6 +45,7 @@ const CORNER_STATS={
   CL: {avg:10.1,homeAvg:5.4,awayAvg:4.7,over85:71,over95:57,over105:41},
   CLI:{avg:9.6, homeAvg:5.1,awayAvg:4.5,over85:67,over95:53,over105:37},
   CSA:{avg:9.4, homeAvg:5.0,awayAvg:4.4,over85:65,over95:51,over105:35},
+  WC: {avg:9.8, homeAvg:5.0,awayAvg:4.8,over85:68,over95:53,over105:37},
 };
 
 const LEAGUE_MARKET_STATS={
@@ -55,6 +58,7 @@ const LEAGUE_MARKET_STATS={
   CL: [{market:"Over 2.5 Gols",winRate:66,sample:125,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:60,sample:125,trend:"↑"},{market:"1X2 – Vitória Casa",winRate:50,sample:125,trend:"↑"},{market:"Under 2.5 Gols",winRate:34,sample:125,trend:"↓"},{market:"Dupla Chance 1X",winRate:73,sample:125,trend:"↑"},{market:"Escanteios Over 8.5",winRate:71,sample:125,trend:"↑"},{market:"Escanteios Over 9.5",winRate:57,sample:125,trend:"↑"},{market:"Escanteios Over 10.5",winRate:41,sample:125,trend:"→"}],
   CLI:[{market:"Over 2.5 Gols",winRate:62,sample:200,trend:"↑"},{market:"BTTS – Ambas Marcam",winRate:56,sample:200,trend:"→"},{market:"1X2 – Vitória Casa",winRate:52,sample:200,trend:"↑"},{market:"Under 2.5 Gols",winRate:38,sample:200,trend:"↓"},{market:"Dupla Chance 1X",winRate:74,sample:200,trend:"↑"},{market:"Escanteios Over 8.5",winRate:67,sample:200,trend:"→"},{market:"Escanteios Over 9.5",winRate:53,sample:200,trend:"→"},{market:"Escanteios Over 10.5",winRate:37,sample:200,trend:"↓"}],
   CSA:[{market:"Over 2.5 Gols",winRate:59,sample:180,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:53,sample:180,trend:"→"},{market:"1X2 – Vitória Casa",winRate:50,sample:180,trend:"→"},{market:"Under 2.5 Gols",winRate:41,sample:180,trend:"↑"},{market:"Dupla Chance 1X",winRate:72,sample:180,trend:"→"},{market:"Escanteios Over 8.5",winRate:65,sample:180,trend:"→"},{market:"Escanteios Over 9.5",winRate:51,sample:180,trend:"↓"},{market:"Escanteios Over 10.5",winRate:35,sample:180,trend:"↓"}],
+  WC: [{market:"Over 2.5 Gols",winRate:55,sample:128,trend:"→"},{market:"BTTS – Ambas Marcam",winRate:50,sample:128,trend:"→"},{market:"1X2 – Vitória Casa",winRate:42,sample:128,trend:"→"},{market:"Under 2.5 Gols",winRate:45,sample:128,trend:"↑"},{market:"Dupla Chance 1X",winRate:66,sample:128,trend:"→"},{market:"Escanteios Over 8.5",winRate:68,sample:128,trend:"→"},{market:"Escanteios Over 9.5",winRate:53,sample:128,trend:"→"},{market:"Escanteios Over 10.5",winRate:37,sample:128,trend:"↓"}],
 };
 
 const MARKET_INFO={
@@ -583,7 +587,7 @@ export default function App(){
     try{
       const calYear=selDate.getFullYear();
       const calMonth=selDate.getMonth();
-      const calendarLeagues=["BSA","MLS","CLI","CSA"];
+      const calendarLeagues=["BSA","MLS","CLI","CSA","WC"];
       const season=calendarLeagues.includes(selLeague.code)?calYear:(calMonth>=7?calYear:calYear-1);
       const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
@@ -620,7 +624,7 @@ export default function App(){
     setLoadingLive(true);
     try{
       const ds=fmtISO(nowDate());
-      const activeLeagues=["PL","BSA","PD","SA","BL1","FL1","CL","CLI","CSA"];
+      const activeLeagues=["PL","BSA","PD","SA","BL1","FL1","CL","CLI","CSA","WC"];
       const live=[];
       for(const code of activeLeagues){
         try{
