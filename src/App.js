@@ -648,18 +648,14 @@ export default function App(){
     catch(e){setErr("Erro: "+e.message);}finally{setLoadingFix(false);}
   },[fdKey,selLeague,dateStr,selDate]);
 
-  /* ── LOAD ANALYSIS ── */
+    /* ── LOAD ANALYSIS ── */
   const loadAnalysis=useCallback(async(fixture)=>{
     setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");setShowRawData(false);setAnaStep(1);
     try{
-      const calYear=selDate.getFullYear();
-      const calMonth=selDate.getMonth();
-      const calendarLeagues=["BSA","MLS","CLI","CSA","WC"];
-      const season=calendarLeagues.includes(selLeague.code)?calYear:(calMonth>=7?calYear:calYear-1);
-      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
+      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?limit=12&status=FINISHED`,fdKey);
       await sleep(6500);
       setAnaStep(2);
-      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?season=${season}&limit=12&status=FINISHED`,fdKey);
+      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?limit=12&status=FINISHED`,fdKey);
       const hs=parseStatsFD(hr,fixture.homeTeam.id);
       const as_=parseStatsFD(ar,fixture.awayTeam.id);
       let oddsData=null;
@@ -686,6 +682,7 @@ export default function App(){
     }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);setAnaStep(0);}
   },[fdKey,oddsKey,selLeague,selDate,dateStr,gptKey]);
 
+
   /* ── LIVE TRACKING ── */
   const loadLiveGames=useCallback(async()=>{
     setLoadingLive(true);
@@ -707,13 +704,10 @@ export default function App(){
     finally{setLoadingLive(false);}
   },[fdKey]);
 
-  /* ── SCANNER ── */
+     /* ── SCANNER ── */
   const runScanner=useCallback(async()=>{
     setScanning(true);setScanErr("");setScanResults([]);setLuckyBet(null);setCombinadadSugerida(null);
     const ds=fmtISO(scanDate);
-    const calYear=scanDate.getFullYear();
-    const calMonth=scanDate.getMonth();
-    const calendarLeagues=["BSA","MLS","CLI","CSA"];
     const leaguesToScan=scanMode==="auto"?LEAGUES:[scanLeague];
     const allResults=[];
     let totalMatches=0;
@@ -737,14 +731,13 @@ export default function App(){
       for(const{league,matches}of leagueMatches){
         let allOdds=[];
         try{allOdds=await oddsFetch(`sports/${league.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,oddsKey);await sleep(3000);}catch{}
-        const season=calendarLeagues.includes(league.code)?calYear:(calMonth>=7?calYear:calYear-1);
 
         for(const m of matches){
           try{
             setScanProgress({current:++processed,total:totalMatches,league:league.name});
-            const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
+            const hr=await fdFetch(`teams/${m.homeTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
             await sleep(6500);
-            const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?season=${season}&limit=10&status=FINISHED`,fdKey);
+            const ar=await fdFetch(`teams/${m.awayTeam.id}/matches?limit=10&status=FINISHED`,fdKey);
             await sleep(6500);
             const hs=parseStatsFD(hr,m.homeTeam.id);
             const as_=parseStatsFD(ar,m.awayTeam.id);
@@ -758,7 +751,6 @@ export default function App(){
       }
 
       // Fase 3: detectar Chance Lucrativa
-      // Critério: EV positivo + odd >= 2.50 + prob >= 30% (chance real mas odd alta)
       const luckyBets=[];
       allResults.forEach(r=>{
         r.markets.forEach(m=>{
@@ -767,16 +759,12 @@ export default function App(){
           }
         });
       });
-      // Ordena por maior EV absoluto (não relativo) — o que retorna mais em termos absolutos
       luckyBets.sort((a,b)=>b.ev*b.odd-a.ev*a.odd);
       if(luckyBets.length>0)setLuckyBet(luckyBets[0]);
 
       // Fase 4: gerar Combinada Sugerida automaticamente
-      // Pega o melhor mercado de cada jogo (máx 4 jogos, min 2)
-      // Critério: EV positivo, mercados de jogos diferentes, odd entre 1.50 e 3.50
       if(allResults.length>=2 && localStorage.getItem("bta_gpt")){
         const selecoes=[];
-        // Ordena jogos por valueScore e pega o melhor mercado de cada um
         const jogosOrdenados=[...allResults].sort((a,b)=>b.valueScore-a.valueScore);
         for(const r of jogosOrdenados){
           if(selecoes.length>=4)break;
@@ -808,6 +796,7 @@ export default function App(){
       if(!allResults.length)setScanErr("Não foi possível analisar os jogos. Verifique sua chave.");
     }catch(e){setScanErr("Erro: "+e.message);}finally{setScanning(false);setScanProgress({current:0,total:0,league:""});}
   },[fdKey,oddsKey,scanLeague,scanDate,scanMode]);
+
 
   /* ── AGENDA SEMANAL ── */
   const loadAgenda=useCallback(async()=>{
