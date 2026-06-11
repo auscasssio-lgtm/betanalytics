@@ -1,5 +1,8 @@
 // api/ia.js — Análise IA usando Claude (Anthropic)
 module.exports = async function handler(req, res) {
+  // ── CORS ──
+  // ⚠️ Troque "*" pelo seu domínio real depois de estabilizar, ex:
+  // res.setHeader("Access-Control-Allow-Origin", "https://seu-app.vercel.app");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -7,17 +10,45 @@ module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "Chave Anthropic não configurada no servidor. Adicione ANTHROPIC_API_KEY nas variáveis de ambiente do Vercel." });
+  if (!ANTHROPIC_KEY) {
+    return res.status(500).json({
+      error: "Chave Anthropic não configurada no servidor. Adicione ANTHROPIC_API_KEY nas variáveis de ambiente do Vercel.",
+    });
+  }
 
   const { fixture, homeStats, awayStats, markets, leagueName, dateStr } = req.body;
   if (!fixture) return res.status(400).json({ error: "Dados da partida obrigatórios" });
 
-  // Todos os mercados agrupados por categoria
-  const mkResult   = (markets||[]).filter(m=>m.cat==="Resultado");
-  const mkGols     = (markets||[]).filter(m=>m.cat==="Over/Under"||m.cat==="Ambas Marcam"||m.cat==="Dupla Chance");
-  const mkEscanteios = (markets||[]).filter(m=>m.cat==="Escanteios");
+  // ── DEBUG: veja nos Runtime Logs da Vercel o que está chegando ──
+  console.log("INPUT IA:", JSON.stringify({
+    league: leagueName,
+    date: dateStr,
+    home: homeStats,
+    away: awayStats,
+    qtdMarkets: (markets || []).length,
+  }, null, 2));
 
-  const fmtMarket = m => `  • ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev>0?"+":""}${m.ev} | Score ${m.score}/10 | ${m.justif}`;
+  // ── Validação de dados mínimos (evita gastar token à toa) ──
+  const hasStats = !!(homeStats?.played || awayStats?.played);
+  const hasMarkets = (markets || []).length > 0;
+  if (!hasStats && !hasMarkets) {
+    return res.status(422).json({
+      error: "Dados insuficientes para análise. Estatísticas e mercados estão vazios.",
+    });
+  }
+
+  // ── Agrupamento de mercados por categoria ──
+  const mkResult     = (markets || []).filter(m => m.cat === "Resultado");
+  const mkGols       = (markets || []).filter(m => m.cat === "Over/Under" || m.cat === "Ambas Marcam" || m.cat === "Dupla Chance");
+  const mkEscanteios = (markets || []).filter(m => m.cat === "Escanteios");
+
+  const fmtMarket = m =>
+    `  • ${m.name}: Prob ${m.prob}% | Odd ${m.odd?.toFixed(2)} | EV ${m.ev > 0 ? "+" : ""}${m.ev} | Score ${m.score}/10 | ${m.justif}`;
+
+  // ── Aviso de dados faltantes para a IA não "inventar" ──
+  const dataWarning = !hasStats
+    ? "\n⚠️ ATENÇÃO: As estatísticas das equipes estão INDISPONÍVEIS (N/D). Baseie sua análise APENAS nas odds dos mercados listados. NÃO invente dados de forma, gols, competição ou histórico. Seja transparente sobre a baixa confiança nos campos 'alertas' e 'conclusao'.\n"
+    : "";
 
   const prompt = `Você é um analista sênior de apostas esportivas com 15 anos de experiência. Sua tarefa é analisar ESTA partida específica e identificar a MELHOR oportunidade de aposta considerando todos os dados disponíveis.
 
@@ -27,26 +58,26 @@ COMPETIÇÃO: ${leagueName} | DATA: ${dateStr}
 ═══════════════════════════════════
 
 DADOS ESTATÍSTICOS — ${fixture.homeTeam?.name} (CASA):
-• PPG: ${homeStats?.ppg||"N/D"} | Gols marcados/j: ${homeStats?.goalsFor||"N/D"} | Gols sofridos/j: ${homeStats?.goalsAgainst||"N/D"}
-• % vitórias em casa: ${homeStats?.winRateHome||"N/D"}% | BTTS histórico: ${homeStats?.btts||"N/D"}%
-• Forma últimos 5 jogos: ${homeStats?.form?.join(" ")||"N/D"} | Jogos analisados: ${homeStats?.played||"N/D"}
+• PPG: ${homeStats?.ppg || "N/D"} | Gols marcados/j: ${homeStats?.goalsFor || "N/D"} | Gols sofridos/j: ${homeStats?.goalsAgainst || "N/D"}
+• % vitórias em casa: ${homeStats?.winRateHome || "N/D"}% | BTTS histórico: ${homeStats?.btts || "N/D"}%
+• Forma últimos 5 jogos: ${homeStats?.form?.join(" ") || "N/D"} | Jogos analisados: ${homeStats?.played || "N/D"}
 
 DADOS ESTATÍSTICOS — ${fixture.awayTeam?.name} (VISITANTE):
-• PPG: ${awayStats?.ppg||"N/D"} | Gols marcados/j: ${awayStats?.goalsFor||"N/D"} | Gols sofridos/j: ${awayStats?.goalsAgainst||"N/D"}
-• % vitórias fora: ${awayStats?.winRateAway||"N/D"}% | BTTS histórico: ${awayStats?.btts||"N/D"}%
-• Forma últimos 5 jogos: ${awayStats?.form?.join(" ")||"N/D"} | Jogos analisados: ${awayStats?.played||"N/D"}
+• PPG: ${awayStats?.ppg || "N/D"} | Gols marcados/j: ${awayStats?.goalsFor || "N/D"} | Gols sofridos/j: ${awayStats?.goalsAgainst || "N/D"}
+• % vitórias fora: ${awayStats?.winRateAway || "N/D"}% | BTTS histórico: ${awayStats?.btts || "N/D"}%
+• Forma últimos 5 jogos: ${awayStats?.form?.join(" ") || "N/D"} | Jogos analisados: ${awayStats?.played || "N/D"}
 
 TODOS OS MERCADOS DISPONÍVEIS:
 
 [RESULTADO]
-${mkResult.map(fmtMarket).join("\n")||"  N/D"}
+${mkResult.map(fmtMarket).join("\n") || "  N/D"}
 
 [GOLS / BTTS / DUPLA CHANCE]
-${mkGols.map(fmtMarket).join("\n")||"  N/D"}
+${mkGols.map(fmtMarket).join("\n") || "  N/D"}
 
 [ESCANTEIOS]
-${mkEscanteios.map(fmtMarket).join("\n")||"  N/D"}
-
+${mkEscanteios.map(fmtMarket).join("\n") || "  N/D"}
+${dataWarning}
 ═══════════════════════════════════
 INSTRUÇÕES DE ANÁLISE:
 1. Analise os padrões estatísticos de cada time (ataque, defesa, forma, comportamento em casa/fora)
@@ -97,7 +128,7 @@ Responda APENAS com este JSON válido:
         max_tokens: 3000,
         messages: [
           { role: "user", content: prompt },
-          { role: "assistant", content: "{" }
+          { role: "assistant", content: "{" },
         ],
       }),
     });
@@ -109,11 +140,32 @@ Responda APENAS com este JSON válido:
 
     const data = await response.json();
     const text = data.content?.[0]?.text || "";
-    // O prefill já começou com "{", então adicionamos de volta
+
+    // O prefill começou com "{", então recolocamos e limpamos cercas de código
     const clean = ("{" + text).replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
+
+    // ── Parsing robusto (recupera de truncamento por max_tokens) ──
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      const lastBrace = clean.lastIndexOf("}");
+      if (lastBrace > 0) {
+        try {
+          parsed = JSON.parse(clean.slice(0, lastBrace + 1));
+        } catch {
+          return res.status(502).json({
+            error: "Resposta da IA em formato inválido",
+            raw: clean.slice(0, 300),
+          });
+        }
+      } else {
+        return res.status(502).json({ error: "Resposta vazia ou inválida da IA" });
+      }
+    }
+
     return res.status(200).json(parsed);
   } catch (error) {
     return res.status(500).json({ error: "Erro na análise IA: " + error.message });
   }
-}
+};
