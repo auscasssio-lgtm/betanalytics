@@ -16,17 +16,27 @@ const T = {
 const RS={APOSTAR:{color:T.green,bg:T.greenDim,border:"rgba(56,211,159,0.30)",icon:"✅"},ANALISAR:{color:T.gold,bg:T.goldDim,border:"rgba(245,166,35,0.30)",icon:"⚠️"},EVITAR:{color:T.red,bg:T.redDim,border:"rgba(255,83,112,0.30)",icon:"❌"}};
 
 /* ═══════════════════════════════════════════ CONSTANTS */
-const LEAGUES=[
-  {code:"BSA",name:"Brasileirão",    country:"Brasil",      flag:"🇧🇷",oddsKey:"soccer_brazil_campeonato"},
-  {code:"PL", name:"Premier League", country:"England",     flag:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",oddsKey:"soccer_epl"},
-  {code:"PD", name:"La Liga",        country:"Spain",       flag:"🇪🇸",oddsKey:"soccer_spain_la_liga"},
-  {code:"SA", name:"Serie A",        country:"Italy",       flag:"🇮🇹",oddsKey:"soccer_italy_serie_a"},
-  {code:"BL1",name:"Bundesliga",     country:"Germany",     flag:"🇩🇪",oddsKey:"soccer_germany_bundesliga"},
-  {code:"FL1",name:"Ligue 1",        country:"France",      flag:"🇫🇷",oddsKey:"soccer_france_ligue_1"},
-  {code:"CL", name:"Champions",      country:"Europe",      flag:"🌍",oddsKey:"soccer_uefa_champs_league"},
-  {code:"CLI",name:"Libertadores",   country:"Sul-América", flag:"🏆",oddsKey:"soccer_conmebol_libertadores"},
-  {code:"CSA",name:"Sul-Americana",  country:"Sul-América", flag:"🌎",oddsKey:"soccer_conmebol_sudamericana"},
-  {code:"WC", name:"Copa do Mundo",  country:"Mundo",       flag:"🏆",oddsKey:"soccer_fifa_world_cup"},
+const LEAGUES = [
+  { code:"BSA", name:"Brasileirão",    country:"Brasil",      flag:"🇧🇷", oddsKey:"soccer_brazil_campeonato",       sofaId:325  },
+  { code:"PL",  name:"Premier League", country:"England",     flag:"🏴󠁧󠁢󠁥󠁮󠁧󠁿", oddsKey:"soccer_epl",                      sofaId:17   },
+  { code:"PD",  name:"La Liga",        country:"Spain",       flag:"🇪🇸", oddsKey:"soccer_spain_la_liga",           sofaId:8    },
+  { code:"SA",  name:"Serie A",        country:"Italy",       flag:"🇮🇹", oddsKey:"soccer_italy_serie_a",           sofaId:23   },
+  { code:"BL1", name:"Bundesliga",     country:"Germany",     flag:"🇩🇪", oddsKey:"soccer_germany_bundesliga",      sofaId:35   },
+  { code:"FL1", name:"Ligue 1",        country:"France",      flag:"🇫🇷", oddsKey:"soccer_france_ligue_1",          sofaId:34   },
+  { code:"CL",  name:"Champions",      country:"Europe",      flag:"🌍", oddsKey:"soccer_uefa_champs_league",      sofaId:7    },
+  { code:"CLI", name:"Libertadores",   country:"Sul-América", flag:"🏆", oddsKey:"soccer_conmebol_libertadores",   sofaId:384  },
+  { code:"CSA", name:"Sul-Americana",  country:"Sul-América", flag:"🌎", oddsKey:"soccer_conmebol_sudamericana",   sofaId:480  },
+];
+
+// Copa do Mundo separada — usada na aba especial
+const WC_LEAGUE = {
+  code:"WC", name:"Copa do Mundo 2026", country:"Mundo", flag:"🏆",
+  oddsKey:"soccer_fifa_world_cup", sofaId:16,
+  isNational: true,
+  // Fases do torneio
+  phases: ["Fase de Grupos","Oitavas","Quartas","Semifinal","Final"],
+};
+
 
 ];
 const CURRENCIES=[{code:"BRL",symbol:"R$"},{code:"USD",symbol:"$"},{code:"EUR",symbol:"€"}];
@@ -186,6 +196,162 @@ const LEAGUE_GOAL_AVG = {
   CL:{home:1.60,away:1.25}, CLI:{home:1.60,away:1.05}, CSA:{home:1.50,away:1.05},
   WC:{home:1.45,away:1.15},
 };
+/* ═══════════════════════════════════════════ SOFA API LAYER */
+
+async function sofaFetch(path) {
+  const url = `/api/sofa?path=${encodeURIComponent(path)}`;
+  const r = await fetch(url).catch(e => { throw new Error("Sofa rede: " + e.message); });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`Sofa ${r.status}: ${t.slice(0, 100)}`);
+  }
+  return r.json();
+}
+
+// Jogos de uma liga por data (YYYY-MM-DD)
+async function sofaGetFixtures(tournamentId, date) {
+  try {
+    const data = await sofaFetch(`unique-tournament/${tournamentId}/events/date/${date}`);
+    return data.events || [];
+  } catch {
+    return [];
+  }
+}
+
+// Estatísticas de um evento (xG, posse, chutes)
+async function sofaGetStats(eventId) {
+  try {
+    const data = await sofaFetch(`event/${eventId}/statistics`);
+    // Extrai xG dos grupos de estatísticas
+    let xGHome = null, xGAway = null;
+    (data.statistics || []).forEach(period => {
+      if (period.period !== "ALL") return;
+      (period.groups || []).forEach(group => {
+        (group.statisticsItems || []).forEach(item => {
+          if (item.key === "expectedGoals") {
+            xGHome = parseFloat(item.homeValue) || null;
+            xGAway = parseFloat(item.awayValue) || null;
+          }
+        });
+      });
+    });
+    return { xGHome, xGAway, raw: data.statistics };
+  } catch {
+    return { xGHome: null, xGAway: null };
+  }
+}
+
+// Forma recente de um time (últimas 5 partidas via SofaScore)
+async function sofaGetTeamForm(teamId) {
+  try {
+    const data = await sofaFetch(`team/${teamId}/events/last/0`);
+    const events = (data.events || []).slice(-5).reverse();
+    const form = events.map(e => {
+      const isHome = e.homeTeam?.id === teamId;
+      const hs = e.homeScore?.current ?? 0;
+      const as_ = e.awayScore?.current ?? 0;
+      const gf = isHome ? hs : as_;
+      const ga = isHome ? as_ : hs;
+      return { result: gf > ga ? "W" : gf === ga ? "D" : "L", gf, ga, xG: null };
+    });
+    // xG médio das últimas 5
+    const recentXG = events.map(e => {
+      const isHome = e.homeTeam?.id === teamId;
+      return isHome
+        ? (e.homeScore?.expectedGoals ?? null)
+        : (e.awayScore?.expectedGoals ?? null);
+    }).filter(v => v !== null);
+    return { form, recentXG, sofaEvents: events };
+  } catch {
+    return { form: [], recentXG: [], sofaEvents: [] };
+  }
+}
+
+// Escalações de um evento
+async function sofaGetLineups(eventId) {
+  try {
+    const data = await sofaFetch(`event/${eventId}/lineups`);
+    const extract = (side) => {
+      const players = data[side]?.players || [];
+      const missing = data[side]?.missingPlayers || [];
+      const starters = players.filter(p => p.position !== "G" || true).slice(0, 11);
+      const keyMissing = missing.filter(p =>
+        p.type === "missing" || p.type === "questionable"
+      ).length;
+      return { starters, keyMissing, confirmed: players.length >= 11 };
+    };
+    return {
+      home: extract("home"),
+      away: extract("away"),
+      confirmed: !!(data.home?.players?.length && data.away?.players?.length),
+    };
+  } catch {
+    return { home: { starters: [], keyMissing: 0, confirmed: false }, away: { starters: [], keyMissing: 0, confirmed: false }, confirmed: false };
+  }
+}
+
+// H2H de um evento
+async function sofaGetH2H(eventId) {
+  try {
+    const data = await sofaFetch(`event/${eventId}/h2h/events`);
+    const events = (data.events || []).slice(0, 6);
+    let homeWins = 0, awayWins = 0, draws = 0, totalGoals = 0;
+    events.forEach(e => {
+      const hs = e.homeScore?.current ?? 0;
+      const as_ = e.awayScore?.current ?? 0;
+      totalGoals += hs + as_;
+      if (hs > as_) homeWins++; else if (hs < as_) awayWins++; else draws++;
+    });
+    return {
+      total: events.length,
+      homeWins, awayWins, draws,
+      avgGoals: events.length ? +(totalGoals / events.length).toFixed(2) : null,
+      events,
+    };
+  } catch {
+    return { total: 0, homeWins: 0, awayWins: 0, draws: 0, avgGoals: null };
+  }
+}
+
+// Traduz evento SofaScore → formato compatível com o restante do app
+function sofaEventToFixture(ev) {
+  return {
+    id: ev.id,
+    utcDate: ev.startTimestamp
+      ? new Date(ev.startTimestamp * 1000).toISOString()
+      : new Date().toISOString(),
+    status: ev.status?.type === "inprogress"
+      ? "IN_PLAY"
+      : ev.status?.type === "finished"
+      ? "FINISHED"
+      : "SCHEDULED",
+    homeTeam: {
+      id: ev.homeTeam?.id,
+      name: ev.homeTeam?.name || ev.homeTeam?.shortName || "Casa",
+      crest: ev.homeTeam?.id
+        ? `https://api.sofascore.com/api/v1/team/${ev.homeTeam.id}/image`
+        : null,
+    },
+    awayTeam: {
+      id: ev.awayTeam?.id,
+      name: ev.awayTeam?.name || ev.awayTeam?.shortName || "Visitante",
+      crest: ev.awayTeam?.id
+        ? `https://api.sofascore.com/api/v1/team/${ev.awayTeam.id}/image`
+        : null,
+    },
+    score: {
+      fullTime: {
+        home: ev.homeScore?.current ?? null,
+        away: ev.awayScore?.current ?? null,
+      },
+    },
+    matchday: ev.roundInfo?.round ?? null,
+    _sofaId: ev.id,
+    _sofaHomeXG: ev.homeScore?.expectedGoals ?? null,
+    _sofaAwayXG: ev.awayScore?.expectedGoals ?? null,
+  };
+}
+
 
 // Constrói a matriz de placares (0..maxGoals) e deriva os mercados de gols
 function buildGoalMatrix(lambdaHome, lambdaAway, maxGoals = 8) {
@@ -235,96 +401,279 @@ function computeLambdas(hs, as_, leagueCode) {
   return { lambdaHome, lambdaAway };
 }
 
-function buildMarkets(hs,as_,oddsData,leagueCode="BSA"){
-  const hppg=hs?.ppg||1.2,appg=as_?.ppg||1.0;
-  const hgf=hs?.goalsFor||1.3,agf=as_?.goalsFor||1.1;
-  const hwr=hs?.winRateHome||40,awr=as_?.winRateAway||32;
-  const hbtts=hs?.btts||50,abtts=as_?.btts||48;
-  const totalG=hgf+agf;
-  const { lambdaHome, lambdaAway } = computeLambdas(hs, as_, leagueCode);
-  const gm = buildGoalMatrix(lambdaHome, lambdaAway);
-  const hwp=clamp(gm.home,8,85);
-const awp=clamp(gm.away,6,75);
-const dwp=clamp(gm.draw,8,42);
-const o25=clamp(gm.over25,15,90);
-const o35=clamp(gm.over35,8,78);
-const bttp=clamp(Math.round(gm.btts*0.6+((hbtts+abtts)/2)*0.4),18,82);
-const dc1x=clamp(gm.dc1x,50,96);
+/* ═══════════════════════════════════════════ PREDICTION ENGINE V2
+   Poisson Duplo + Fatores Contextuais + xG + Escalação + Copa
+═══════════════════════════════════════════ */
 
+// Perfis históricos por liga — base para calibração do modelo
+const LEAGUE_PROFILES = {
+  BSA: { avgGoals:2.50, bttsRate:0.55, over25:0.58, homeAdv:1.18, name:"Brasileirão"      },
+  PL:  { avgGoals:2.85, bttsRate:0.62, over25:0.68, homeAdv:1.15, name:"Premier League"   },
+  PD:  { avgGoals:2.70, bttsRate:0.58, over25:0.65, homeAdv:1.20, name:"La Liga"           },
+  SA:  { avgGoals:2.60, bttsRate:0.52, over25:0.55, homeAdv:1.22, name:"Serie A"           },
+  BL1: { avgGoals:3.10, bttsRate:0.63, over25:0.70, homeAdv:1.18, name:"Bundesliga"        },
+  FL1: { avgGoals:2.65, bttsRate:0.55, over25:0.60, homeAdv:1.20, name:"Ligue 1"           },
+  CL:  { avgGoals:2.75, bttsRate:0.60, over25:0.66, homeAdv:1.12, name:"Champions"         },
+  CLI: { avgGoals:2.65, bttsRate:0.56, over25:0.62, homeAdv:1.25, name:"Libertadores"      },
+  CSA: { avgGoals:2.55, bttsRate:0.53, over25:0.59, homeAdv:1.22, name:"Sul-Americana"     },
+  WC:  { avgGoals:2.48, bttsRate:0.44, over25:0.48, homeAdv:1.00, name:"Copa do Mundo"     },
+};
 
-  // Escanteios — usa médias históricas da liga + estilo ofensivo dos times
-  const cs=CORNER_STATS[leagueCode]||CORNER_STATS.BSA;
-  // Fator ofensivo: times com mais gols tendem a gerar mais escanteios
-  const offFactor=clamp((hgf+agf)/2.4,0.8,1.3);
-  // Fator pressão: times com mais vitórias em casa pressionam mais
-  const pressFactor=clamp((hwr+awr)/80,0.9,1.2);
-  const cornerFactor=offFactor*pressFactor;
-  const expCorners=+(cs.avg*cornerFactor).toFixed(1);
-  const homeCorners=+(cs.homeAvg*(hgf/1.3)*clamp(hwr/45,0.8,1.3)).toFixed(1);
-  const awayCorners=+(cs.awayAvg*(agf/1.1)*clamp(awr/35,0.8,1.3)).toFixed(1);
+// Pesos para forma recente (jogo mais recente vale mais)
+const FORM_WEIGHTS = [0.35, 0.25, 0.20, 0.12, 0.08];
 
-  const o85=clamp(Math.round(cs.over85*cornerFactor),45,90);
-  const o95=clamp(Math.round(cs.over95*cornerFactor),30,80);
-  const o105=clamp(Math.round(cs.over105*cornerFactor),18,68);
+// Converte sequência de resultados em índice de forma ponderado (-1 a +1)
+function formTrend(formArr) {
+  if (!formArr?.length) return 0;
+  const pts = formArr.slice(0, 5).map(r => r === "W" ? 1 : r === "D" ? 0.33 : -0.5);
+  const weighted = pts.reduce((acc, v, i) => acc + v * (FORM_WEIGHTS[i] || 0.05), 0);
+  return clamp(weighted, -1, 1);
+}
 
-  // Quem bate mais escanteios
-  const homeMoreCorners=clamp(Math.round(50+(homeCorners-awayCorners)*8),25,78);
-  const awayMoreCorners=100-homeMoreCorners;
+// Média ponderada de xG das últimas partidas
+function weightedXG(xgArr) {
+  if (!xgArr?.length) return null;
+  const valid = xgArr.filter(v => v != null && !isNaN(v)).slice(0, 5);
+  if (!valid.length) return null;
+  const total = valid.reduce((acc, v, i) => acc + v * (FORM_WEIGHTS[i] || 0.05), 0);
+  const weightSum = FORM_WEIGHTS.slice(0, valid.length).reduce((a, b) => a + b, 0);
+  return +(total / weightSum).toFixed(2);
+}
 
-  // Primeiro escanteio (proporcional à pressão no início)
-  const firstCornHome=clamp(Math.round(50+(hwr-awr)*0.3+(hgf-agf)*5),35,68);
-  const firstCornAway=100-firstCornHome;
+// Simulação Monte Carlo — 500 partidas simuladas para distribuição mais precisa
+function monteCarlo(lambdaHome, lambdaAway, simulations = 500) {
+  function poissonRandom(lambda) {
+    const L = Math.exp(-lambda);
+    let k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  }
+  let homeW = 0, draws = 0, awayW = 0;
+  let over15 = 0, over25 = 0, over35 = 0, btts = 0;
+  const scoreMap = {};
+  for (let i = 0; i < simulations; i++) {
+    const h = poissonRandom(lambdaHome);
+    const a = poissonRandom(lambdaAway);
+    if (h > a) homeW++; else if (h === a) draws++; else awayW++;
+    const tot = h + a;
+    if (tot >= 2) over15++;
+    if (tot >= 3) over25++;
+    if (tot >= 4) over35++;
+    if (h >= 1 && a >= 1) btts++;
+    const key = `${h}-${a}`;
+    scoreMap[key] = (scoreMap[key] || 0) + 1;
+  }
+  // Placar mais provável pela simulação
+  const bestScore = Object.entries(scoreMap).sort((a, b) => b[1] - a[1])[0]?.[0] || "1-1";
+  const pct = v => Math.round((v / simulations) * 100);
+  return {
+    home: pct(homeW), draw: pct(draws), away: pct(awayW),
+    over25: pct(over25), over35: pct(over35), under25: pct(simulations - over25),
+    btts: pct(btts), dc1x: pct(homeW + draws),
+    scoreLine: bestScore,
+    scoreMap,
+  };
+}
 
-  // Handicap escanteios casa -1.5
-  const hcCornerHome=clamp(Math.round(homeMoreCorners*0.72),20,60);
+// Confiança dinâmica do modelo (0-100)
+function calcModelConfidence({ hs, as_, hasRealOdds, xGAvailable, lineupsConfirmed, h2hSample }) {
+  let score = 40; // base
+  if (hs?.played >= 8)  score += 12;
+  if (as_?.played >= 8) score += 12;
+  if (hasRealOdds)       score += 16;
+  if (xGAvailable)       score += 10;
+  if (lineupsConfirmed)  score += 6;
+  if (h2hSample >= 3)    score += 4;
+  return clamp(score, 10, 100);
+}
 
-  const ro={};
-  const allBookmakers=[]; // para comparação de odds
-  if(oddsData?.bookmakers?.length){
-    oddsData.bookmakers.forEach(b=>{
-      const bkOdds={name:b.title||b.key};
-      b.markets?.forEach(mkt=>{
-        if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{
-          if(o.name==="Home"){if(!ro.home)ro.home=o.price;bkOdds.home=o.price;}
-          if(o.name==="Away"){if(!ro.away)ro.away=o.price;bkOdds.away=o.price;}
-          if(o.name==="Draw"){if(!ro.draw)ro.draw=o.price;bkOdds.draw=o.price;}
+// ENGINE PRINCIPAL V2
+function buildMarketsV2(hs, as_, oddsData, leagueCode = "BSA", sofaCtx = {}) {
+  const lg    = LEAGUE_PROFILES[leagueCode] || LEAGUE_PROFILES.BSA;
+  const lgAvg = LEAGUE_GOAL_AVG[leagueCode] || LEAGUE_GOAL_AVG.BSA;
+  const isNational = leagueCode === "WC";
+
+  // ── 1. xG ponderado (prefere xG do SofaScore se disponível) ──
+  const xGHome = sofaCtx.xGHome ?? weightedXG(sofaCtx.homeRecentXG) ?? hs?.goalsFor ?? lgAvg.home;
+  const xGAway = sofaCtx.xGAway ?? weightedXG(sofaCtx.awayRecentXG) ?? as_?.goalsFor ?? lgAvg.away;
+
+  // ── 2. Força relativa à liga ──
+  const hgf = hs?.goalsFor  || lgAvg.home;
+  const hga = hs?.goalsAgainst || lgAvg.away;
+  const agf = as_?.goalsFor  || lgAvg.away;
+  const aga = as_?.goalsAgainst || lgAvg.home;
+
+  // Blend xG (60%) + médias brutas (40%) para suavizar amostras pequenas
+  const xGBlendHome = xGHome * 0.6 + hgf * 0.4;
+  const xGBlendAway = xGAway * 0.6 + agf * 0.4;
+
+  const attHome = clamp(xGBlendHome / lgAvg.home, 0.35, 2.5);
+  const defAway = clamp(aga / lgAvg.home, 0.35, 2.5);
+  const attAway = clamp(xGBlendAway / lgAvg.away, 0.35, 2.5);
+  const defHome = clamp(hga / lgAvg.away, 0.35, 2.5);
+
+  // ── 3. Lambdas base ──
+  let λH = clamp(attHome * defAway * lgAvg.home * lg.homeAdv, 0.15, 5.0);
+  let λA = clamp(attAway * defHome * lgAvg.away, 0.15, 5.0);
+
+  // ── 4. Ajustes contextuais ──
+
+  // Desfalques confirmados (escalação SofaScore)
+  if (sofaCtx.homeMissingKey > 0) λH *= Math.max(0.80, 1 - sofaCtx.homeMissingKey * 0.06);
+  if (sofaCtx.awayMissingKey > 0) λA *= Math.max(0.80, 1 - sofaCtx.awayMissingKey * 0.06);
+
+  // Forma recente ponderada
+  const homeTrend = formTrend(sofaCtx.homeForm ?? hs?.form);
+  const awayTrend = formTrend(sofaCtx.awayForm ?? as_?.form);
+  λH *= (1 + homeTrend * 0.08);
+  λA *= (1 + awayTrend * 0.08);
+
+  // H2H — se a média de gols do H2H diverge muito da média da liga, ajusta
+  if (sofaCtx.h2hAvgGoals != null) {
+    const h2hFactor = clamp(sofaCtx.h2hAvgGoals / (lg.avgGoals || 2.6), 0.85, 1.20);
+    λH *= Math.sqrt(h2hFactor); // raiz para suavizar
+    λA *= Math.sqrt(h2hFactor);
+  }
+
+  // Regressão à média — times em extremos de forma voltam ao normal
+  const leagueAvgLambda = (lgAvg.home + lgAvg.away) / 2;
+  const REGRESSION = 0.12;
+  λH = λH * (1 - REGRESSION) + leagueAvgLambda * REGRESSION;
+  λA = λA * (1 - REGRESSION) + leagueAvgLambda * REGRESSION;
+
+  // ── 5. Ajustes Copa do Mundo ──
+  if (isNational) {
+    // Ranking FIFA: quanto maior a diferença, mais o favorito é beneficiado
+    const rankDiff = ((sofaCtx.awayFifaRank || 20) - (sofaCtx.homeFifaRank || 20)) / 100;
+    λH *= (1 + rankDiff * 0.10);
+    λA *= (1 - rankDiff * 0.07);
+
+    // Fadiga por viagem (0 = sem fadiga, 1 = viagem longa)
+    const fatigue = sofaCtx.travelFatigue || 0;
+    λA *= (1 - fatigue * 0.04);
+
+    // Motivação (já classificado = possível rotação)
+    λH *= (sofaCtx.homeMotivation || 1.0);
+    λA *= (sofaCtx.awayMotivation || 1.0);
+
+    // Campo neutro — sem vantagem de mandante
+    λH /= lg.homeAdv; // cancela o homeAdv já aplicado
+  }
+
+  λH = clamp(λH, 0.15, 4.8);
+  λA = clamp(λA, 0.15, 4.8);
+
+  // ── 6. Monte Carlo (500 simulações) ──
+  const mc = monteCarlo(λH, λA, 500);
+
+  // ── 7. Blend Monte Carlo (70%) + Poisson analítico (30%) ──
+  const pm = buildGoalMatrix(λH, λA);
+  const blend = (mc_val, pm_val) => Math.round(mc_val * 0.7 + pm_val * 0.3);
+
+  const hwp  = clamp(blend(mc.home,  pm.home),  5, 88);
+  const dwp  = clamp(blend(mc.draw,  pm.draw),  5, 45);
+  const awp  = clamp(blend(mc.away,  pm.away),  5, 82);
+  const o25  = clamp(blend(mc.over25,pm.over25),12, 92);
+  const o35  = clamp(blend(mc.over35,pm.over35), 6, 80);
+  const bttp = clamp(blend(mc.btts, pm.btts),   14, 84);
+  const dc1x = clamp(blend(mc.dc1x, pm.dc1x),   48, 96);
+
+  // Confiança dinâmica
+  const confidence = calcModelConfidence({
+    hs, as_,
+    hasRealOdds: !!(oddsData?.bookmakers?.length),
+    xGAvailable: sofaCtx.xGHome != null || (sofaCtx.homeRecentXG?.length > 0),
+    lineupsConfirmed: sofaCtx.lineupsConfirmed || false,
+    h2hSample: sofaCtx.h2hTotal || 0,
+  });
+
+  // ── 8. Odds reais ──
+  const ro = {};
+  if (oddsData?.bookmakers?.length) {
+    oddsData.bookmakers.forEach(b => {
+      b.markets?.forEach(mkt => {
+        if (mkt.key === "h2h") mkt.outcomes?.forEach(o => {
+          if (o.name === "Home" && !ro.home)  ro.home  = o.price;
+          if (o.name === "Away" && !ro.away)  ro.away  = o.price;
+          if (o.name === "Draw" && !ro.draw)  ro.draw  = o.price;
         });
-        if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{
-          if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1){if(!ro.over25)ro.over25=o.price;bkOdds.over25=o.price;}
-          if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1){if(!ro.under25)ro.under25=o.price;bkOdds.under25=o.price;}
-          if(o.name==="Over"&&Math.abs((o.point||0)-3.5)<0.1){if(!ro.over35)ro.over35=o.price;bkOdds.over35=o.price;}
+        if (mkt.key === "totals") mkt.outcomes?.forEach(o => {
+          if (o.name === "Over"  && Math.abs((o.point || 0) - 2.5) < 0.1 && !ro.over25)  ro.over25  = o.price;
+          if (o.name === "Under" && Math.abs((o.point || 0) - 2.5) < 0.1 && !ro.under25) ro.under25 = o.price;
+          if (o.name === "Over"  && Math.abs((o.point || 0) - 3.5) < 0.1 && !ro.over35)  ro.over35  = o.price;
         });
       });
-      if(Object.keys(bkOdds).length>1)allBookmakers.push(bkOdds);
     });
   }
-  const hasReal=Object.keys(ro).length>0;
-  const ev=(p,odd)=>+((p/100)*odd-1).toFixed(3);
-  const sc=p=>clamp(Math.round(p/11),1,9);
-  const rec=(p,t1,t2)=>p>=t1?"APOSTAR":p>=t2?"ANALISAR":"EVITAR";
+  const hasReal = Object.keys(ro).length > 0;
+  const ev  = (p, odd) => +((p / 100) * odd - 1).toFixed(3);
+  const sc  = p => clamp(Math.round(p / 11), 1, 9);
+  const rec = (p, t1, t2) => p >= t1 ? "APOSTAR" : p >= t2 ? "ANALISAR" : "EVITAR";
 
-  return[
-    // Mercados de resultado
-    {name:"1X2 – Vitória Casa",   cat:"Resultado",    prob:hwp, odd:ro.home||1.90,  score:sc(hwp), rec:rec(hwp,62,45), ev:ev(hwp,ro.home||1.90),  justif:`Aproveit. casa: ${hwr}% · PPG: ${hppg.toFixed(2)}`},
-    {name:"Empate (X)",           cat:"Resultado",    prob:dwp, odd:ro.draw||3.20,  score:sc(dwp), rec:rec(dwp,35,25), ev:ev(dwp,ro.draw||3.20),  justif:`Prob. de empate: ${dwp}%`},
-    {name:"1X2 – Vitória Visit.", cat:"Resultado",    prob:awp, odd:ro.away||2.60,  score:sc(awp), rec:rec(awp,55,40), ev:ev(awp,ro.away||2.60),  justif:`Aproveit. fora: ${awr}% · PPG: ${appg.toFixed(2)}`},
-    // Mercados de gols
-    {name:"Over 2.5 Gols",        cat:"Over/Under",   prob:o25, odd:ro.over25||1.85,score:sc(o25), rec:rec(o25,65,50), ev:ev(o25,ro.over25||1.85),justif:`Média total: ${totalG.toFixed(2)} gols/j`},
-    {name:"Over 3.5 Gols",        cat:"Over/Under",   prob:o35, odd:ro.over35||2.35,score:sc(o35), rec:rec(o35,55,40), ev:ev(o35,ro.over35||2.35),justif:`Requer ataque forte · média ${totalG.toFixed(2)}`},
-    {name:"Under 2.5 Gols",       cat:"Over/Under",   prob:100-o25,odd:ro.under25||2.00,score:sc(100-o25),rec:rec(100-o25,52,40),ev:ev(100-o25,ro.under25||2.00),justif:`Under favorecido quando média ≤ 2.5`},
-    {name:"BTTS – Ambas Marcam",  cat:"Ambas Marcam", prob:bttp,odd:1.90,           score:sc(bttp), rec:rec(bttp,62,50), ev:ev(bttp,1.90),          justif:`BTTS casa ${hbtts}%, visit. ${abtts}%`},
-    {name:"Dupla Chance 1X",      cat:"Dupla Chance", prob:dc1x,odd:1.25,           score:sc(dc1x), rec:rec(dc1x,72,58), ev:ev(dc1x,1.25),          justif:`Cobre vitória + empate · ${dc1x}%`},
-    // Mercados de escanteios
-    {name:"Escanteios Over 8.5",        cat:"Escanteios",    prob:o85,           odd:1.65,score:sc(o85),           rec:rec(o85,72,58),           ev:ev(o85,1.65),           justif:`Prev. ${expCorners} escanteios · Liga: ${cs.avg} média`},
-    {name:"Escanteios Over 9.5",        cat:"Escanteios",    prob:o95,           odd:1.90,score:sc(o95),           rec:rec(o95,62,48),           ev:ev(o95,1.90),           justif:`${homeCorners.toFixed(1)} (casa) + ${awayCorners.toFixed(1)} (visit.) esperados`},
-    {name:"Escanteios Over 10.5",       cat:"Escanteios",    prob:o105,          odd:2.20,score:sc(o105),          rec:rec(o105,52,40),          ev:ev(o105,2.20),          justif:`Requer jogo aberto · ${cs.over105}% histórico na liga`},
-    {name:"Escanteios Time Casa",       cat:"Escanteios",    prob:homeMoreCorners,odd:1.85,score:sc(homeMoreCorners),rec:rec(homeMoreCorners,60,45),ev:ev(homeMoreCorners,1.85),justif:`Casa: ${homeCorners.toFixed(1)} · Visit.: ${awayCorners.toFixed(1)} escanteios esperados`},
-    {name:"Escanteios Time Visit.",     cat:"Escanteios",    prob:awayMoreCorners,odd:2.10,score:sc(awayMoreCorners),rec:rec(awayMoreCorners,55,40),ev:ev(awayMoreCorners,2.10),justif:`Visitante precisa dominar territoriamente`},
-    {name:"1º Escanteio — Casa",        cat:"Escanteios",    prob:firstCornHome, odd:1.80,score:sc(firstCornHome), rec:rec(firstCornHome,60,45), ev:ev(firstCornHome,1.80), justif:`Casa pressiona mais no início · ${hwr}% aproveit. em casa`},
-    {name:"1º Escanteio — Visit.",      cat:"Escanteios",    prob:firstCornAway, odd:2.10,score:sc(firstCornAway), rec:rec(firstCornAway,52,38), ev:ev(firstCornAway,2.10), justif:`Odds maiores por ser menos provável`},
-    {name:"Handicap Escanteios Casa -1.5",cat:"Escanteios",  prob:hcCornerHome,  odd:2.00,score:sc(hcCornerHome),  rec:rec(hcCornerHome,52,38),  ev:ev(hcCornerHome,2.00),  justif:`Casa precisa bater 2+ escanteios a mais`},
-  ].map(m=>({...m,hasRealOdd:hasReal})).sort((a,b)=>b.score-a.score);
+  // ── 9. Escanteios ──
+  const cs = CORNER_STATS[leagueCode] || CORNER_STATS.BSA;
+  const offFactor   = clamp((hgf + agf) / 2.4, 0.75, 1.35);
+  const pressFactor = clamp(((hs?.winRateHome || 40) + (as_?.winRateAway || 32)) / 80, 0.85, 1.25);
+  const cornerFactor = offFactor * pressFactor;
+  const expCorners  = +(cs.avg * cornerFactor).toFixed(1);
+  const homeCorners = +(cs.homeAvg * (hgf / 1.3) * clamp((hs?.winRateHome || 40) / 45, 0.8, 1.3)).toFixed(1);
+  const awayCorners = +(cs.awayAvg * (agf / 1.1) * clamp((as_?.winRateAway || 32) / 35, 0.8, 1.3)).toFixed(1);
+  const o85  = clamp(Math.round(cs.over85  * cornerFactor), 42, 90);
+  const o95  = clamp(Math.round(cs.over95  * cornerFactor), 27, 82);
+  const o105 = clamp(Math.round(cs.over105 * cornerFactor), 15, 70);
+  const homeMoreCorners = clamp(Math.round(50 + (homeCorners - awayCorners) * 8), 25, 78);
+  const awayMoreCorners = 100 - homeMoreCorners;
+  const firstCornHome   = clamp(Math.round(50 + ((hs?.winRateHome || 40) - (as_?.winRateAway || 32)) * 0.3 + (hgf - agf) * 5), 35, 68);
+  const firstCornAway   = 100 - firstCornHome;
+  const hcCornerHome    = clamp(Math.round(homeMoreCorners * 0.72), 18, 62);
+
+  // ── 10. Placar mais provável ──
+  const scoreLine = mc.scoreLine || pm.scoreLine || "1-1";
+
+  const hppg = hs?.ppg || 1.2;
+  const appg = as_?.ppg || 1.0;
+  const hwr  = hs?.winRateHome || 40;
+  const awr  = as_?.winRateAway || 32;
+  const hbtts = hs?.btts || 50;
+  const abtts = as_?.btts || 48;
+  const totalG = hgf + agf;
+
+  const markets = [
+    { name:"1X2 – Vitória Casa",   cat:"Resultado",    prob:hwp, odd:ro.home||1.90,  score:sc(hwp), rec:rec(hwp,62,45), ev:ev(hwp,ro.home||1.90),  justif:`Aproveit. casa: ${hwr}% · PPG: ${hppg.toFixed(2)} · λ=${λH.toFixed(2)}`},
+    { name:"Empate (X)",           cat:"Resultado",    prob:dwp, odd:ro.draw||3.20,  score:sc(dwp), rec:rec(dwp,35,25), ev:ev(dwp,ro.draw||3.20),  justif:`Prob. empate: ${dwp}% · Monte Carlo 500sim`},
+    { name:"1X2 – Vitória Visit.", cat:"Resultado",    prob:awp, odd:ro.away||2.60,  score:sc(awp), rec:rec(awp,55,40), ev:ev(awp,ro.away||2.60),  justif:`Aproveit. fora: ${awr}% · PPG: ${appg.toFixed(2)} · λ=${λA.toFixed(2)}`},
+    { name:"Over 2.5 Gols",        cat:"Over/Under",   prob:o25, odd:ro.over25||1.85,score:sc(o25), rec:rec(o25,65,50), ev:ev(o25,ro.over25||1.85),justif:`λH=${λH.toFixed(2)} + λA=${λA.toFixed(2)} = ${(λH+λA).toFixed(2)} esperados`},
+    { name:"Over 3.5 Gols",        cat:"Over/Under",   prob:o35, odd:ro.over35||2.35,score:sc(o35), rec:rec(o35,55,40), ev:ev(o35,ro.over35||2.35),justif:`Requer ataque forte · média ${totalG.toFixed(2)}`},
+    { name:"Under 2.5 Gols",       cat:"Over/Under",   prob:100-o25, odd:ro.under25||2.00, score:sc(100-o25), rec:rec(100-o25,52,40), ev:ev(100-o25,ro.under25||2.00), justif:`Under favorecido · λ total ${(λH+λA).toFixed(2)}`},
+    { name:"BTTS – Ambas Marcam",  cat:"Ambas Marcam", prob:bttp,odd:1.90,           score:sc(bttp),rec:rec(bttp,62,50),ev:ev(bttp,1.90),           justif:`BTTS casa ${hbtts}%, visit. ${abtts}% · Monte Carlo`},
+    { name:"Dupla Chance 1X",      cat:"Dupla Chance", prob:dc1x,odd:1.25,           score:sc(dc1x),rec:rec(dc1x,72,58),ev:ev(dc1x,1.25),           justif:`Cobre vitória + empate · ${dc1x}%`},
+    { name:"Escanteios Over 8.5",        cat:"Escanteios", prob:o85,            odd:1.65, score:sc(o85),            rec:rec(o85,72,58),            ev:ev(o85,1.65),            justif:`Prev. ${expCorners} escanteios · Liga: ${cs.avg} média`},
+    { name:"Escanteios Over 9.5",        cat:"Escanteios", prob:o95,            odd:1.90, score:sc(o95),            rec:rec(o95,62,48),            ev:ev(o95,1.90),            justif:`${homeCorners.toFixed(1)} (casa) + ${awayCorners.toFixed(1)} (visit.) esperados`},
+    { name:"Escanteios Over 10.5",       cat:"Escanteios", prob:o105,           odd:2.20, score:sc(o105),           rec:rec(o105,52,40),           ev:ev(o105,2.20),           justif:`Requer jogo aberto · ${cs.over105}% histórico`},
+    { name:"Escanteios Time Casa",       cat:"Escanteios", prob:homeMoreCorners, odd:1.85, score:sc(homeMoreCorners), rec:rec(homeMoreCorners,60,45), ev:ev(homeMoreCorners,1.85), justif:`Casa: ${homeCorners.toFixed(1)} · Visit.: ${awayCorners.toFixed(1)} esperados`},
+    { name:"Escanteios Time Visit.",     cat:"Escanteios", prob:awayMoreCorners, odd:2.10, score:sc(awayMoreCorners), rec:rec(awayMoreCorners,55,40), ev:ev(awayMoreCorners,2.10), justif:`Visitante precisa dominar territorialmente`},
+    { name:"1º Escanteio — Casa",        cat:"Escanteios", prob:firstCornHome,   odd:1.80, score:sc(firstCornHome),   rec:rec(firstCornHome,60,45),   ev:ev(firstCornHome,1.80),   justif:`Casa pressiona início · ${hwr}% aproveit. casa`},
+    { name:"1º Escanteio — Visit.",      cat:"Escanteios", prob:firstCornAway,   odd:2.10, score:sc(firstCornAway),   rec:rec(firstCornAway,52,38),   ev:ev(firstCornAway,2.10),   justif:`Odds maiores por ser menos provável`},
+    { name:"Handicap Escanteios Casa -1.5", cat:"Escanteios", prob:hcCornerHome, odd:2.00, score:sc(hcCornerHome),    rec:rec(hcCornerHome,52,38),    ev:ev(hcCornerHome,2.00),    justif:`Casa precisa bater 2+ escanteios a mais`},
+  ].map(m => ({
+    ...m,
+    hasRealOdd: hasReal,
+    confidence,
+    lambdaHome: +λH.toFixed(2),
+    lambdaAway: +λA.toFixed(2),
+    scoreLine,
+    xGHome: +xGHome.toFixed(2),
+    xGAway: +xGAway.toFixed(2),
+  })).sort((a, b) => b.score - a.score);
+
+  return markets;
 }
+
+// Alias de compatibilidade — o restante do app chama buildMarkets()
+function buildMarkets(hs, as_, oddsData, leagueCode = "BSA", sofaCtx = {}) {
+  return buildMarketsV2(hs, as_, oddsData, leagueCode, sofaCtx);
+}
+
 // Export bookmakers separately for display
 buildMarkets.lastBookmakers=[];
 
@@ -615,6 +964,15 @@ export default function App(){
 
   // Agenda semanal
   const[agenda,setAgenda]=useState([]);
+    // ── Copa do Mundo 2026 ──
+  const [wcTab, setWcTab]           = useState(false);          // true = aba Copa aberta
+  const [wcFixtures, setWcFixtures] = useState([]);
+  const [wcLoading, setWcLoading]   = useState(false);
+  const [wcDate, setWcDate]         = useState(nowDate());
+  const [wcScanResults, setWcScanResults] = useState([]);
+  const [wcScanning, setWcScanning] = useState(false);
+  const [wcError, setWcError]       = useState("");
+
   const[loadingAgenda,setLoadingAgenda]=useState(false);
   const[agendaLeagues,setAgendaLeagues]=useState(["BSA","PL"]);
 
@@ -857,6 +1215,128 @@ const runScanner=useCallback(async()=>{
     setAgenda(results);
     setLoadingAgenda(false);
   },[fdKey,agendaLeagues]);
+    /* ── COPA DO MUNDO: busca jogos do dia via SofaScore ── */
+  const loadWcFixtures = useCallback(async () => {
+    setWcLoading(true); setWcError(""); setWcFixtures([]);
+    try {
+      const ds = fmtISO(wcDate);
+      const events = await sofaGetFixtures(WC_LEAGUE.sofaId, ds);
+      setWcFixtures(events.map(sofaEventToFixture));
+      if (!events.length) setWcError(`Nenhum jogo da Copa em ${fmtBR(wcDate)}.`);
+    } catch (e) {
+      setWcError("Erro ao buscar Copa: " + e.message);
+    } finally {
+      setWcLoading(false);
+    }
+  }, [wcDate]);
+
+  /* ── COPA DO MUNDO: scanner completo com modelo nacional ── */
+  const runWcScanner = useCallback(async () => {
+    setWcScanning(true); setWcError(""); setWcScanResults([]);
+    const ds = fmtISO(wcDate);
+    try {
+      const events = await sofaGetFixtures(WC_LEAGUE.sofaId, ds);
+      if (!events.length) { setWcError("Nenhum jogo da Copa hoje."); return; }
+
+      const results = [];
+      for (const ev of events.slice(0, 6)) {
+        const f = sofaEventToFixture(ev);
+        try {
+          // H2H e xG do evento
+          const [h2h, stats, lineups] = await Promise.all([
+            sofaGetH2H(ev.id),
+            sofaGetStats(ev.id),
+            sofaGetLineups(ev.id),
+          ]);
+
+          // Forma recente dos times (via SofaScore)
+          const [homeForm, awayForm] = await Promise.all([
+            sofaGetTeamForm(ev.homeTeam?.id),
+            sofaGetTeamForm(ev.awayTeam?.id),
+          ]);
+          await sleep(1000);
+
+          // Odds (via The Odds API — mantemos para detecção de value)
+          let oddsData = null;
+          try {
+            const allOdds = await oddsFetch(
+              `sports/${WC_LEAGUE.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${ds}T00:00:00Z&dateTo=${ds}T23:59:59Z`,
+              oddsKey
+            );
+            oddsData = Array.isArray(allOdds)
+              ? allOdds.find(o =>
+                  (o.home_team || "").toLowerCase().includes(
+                    (f.homeTeam.name || "").toLowerCase().split(" ")[0]
+                  )
+                )
+              : null;
+          } catch {}
+
+          // Contexto Copa do Mundo
+          const sofaCtx = {
+            xGHome: stats.xGHome ?? ev._sofaHomeXG,
+            xGAway: stats.xGAway ?? ev._sofaAwayXG,
+            homeRecentXG: homeForm.recentXG,
+            awayRecentXG: awayForm.recentXG,
+            homeForm: homeForm.form.map(f => f.result),
+            awayForm: awayForm.form.map(f => f.result),
+            homeMissingKey: lineups.home.keyMissing,
+            awayMissingKey: lineups.away.keyMissing,
+            lineupsConfirmed: lineups.confirmed,
+            h2hAvgGoals: h2h.avgGoals,
+            h2hTotal: h2h.total,
+            // Copa: campo neutro + motivação padrão
+            homeMotivation: 1.0,
+            awayMotivation: 1.0,
+            travelFatigue: 0,
+            homeFifaRank: 10, // fallback — sem API de ranking
+            awayFifaRank: 20,
+          };
+
+          const markets = buildMarketsV2(
+            homeForm.form.length >= 3
+              ? {
+                  goalsFor: homeForm.form.reduce((s, x) => s + x.gf, 0) / homeForm.form.length,
+                  goalsAgainst: homeForm.form.reduce((s, x) => s + x.ga, 0) / homeForm.form.length,
+                  ppg: homeForm.form.filter(x => x.result === "W").length / homeForm.form.length * 3,
+                  winRateHome: 50, btts: 50, played: homeForm.form.length,
+                  form: homeForm.form.map(x => x.result),
+                }
+              : null,
+            awayForm.form.length >= 3
+              ? {
+                  goalsFor: awayForm.form.reduce((s, x) => s + x.gf, 0) / awayForm.form.length,
+                  goalsAgainst: awayForm.form.reduce((s, x) => s + x.ga, 0) / awayForm.form.length,
+                  ppg: awayForm.form.filter(x => x.result === "W").length / awayForm.form.length * 3,
+                  winRateAway: 50, btts: 50, played: awayForm.form.length,
+                  form: awayForm.form.map(x => x.result),
+                }
+              : null,
+            oddsData,
+            "WC",
+            sofaCtx
+          );
+
+          const valueScore = calcValueScore(markets, !!(oddsData?.bookmakers?.length));
+          results.push({
+            fixture: f, markets, valueScore,
+            sofaCtx, lineups, h2h, stats,
+            hasOdds: !!oddsData,
+            bestMarkets: markets.filter(m => m.rec === "APOSTAR" && m.ev > 0),
+          });
+          setWcScanResults([...results].sort((a, b) => b.valueScore - a.valueScore));
+        } catch (e) {
+          console.warn("WC skip:", f.homeTeam?.name, e.message);
+        }
+      }
+      if (!results.length) setWcError("Não foi possível analisar os jogos da Copa.");
+    } catch (e) {
+      setWcError("Erro Copa: " + e.message);
+    } finally {
+      setWcScanning(false);
+    }
+  }, [wcDate, oddsKey]);
+
 
   /* ── BET ACTIONS ── */
   const addBet=(m,sugStake,fixture)=>{
@@ -907,6 +1387,28 @@ const runScanner=useCallback(async()=>{
           {[["jogos","⚽","Jogos",0],["analise","🔬","Análise + IA",analysis?1:0],["combinadas","🎰","Combinadas",combinadas.length],["banca","💰","Banca",pending],["ranking","🏆","Ranking",0],["mais","⚙️","Mais",0]].map(([k,ic,lb,badge])=>
             <NavBtn key={k} active={tab===k||((tab==="scanner"||tab==="agenda"||tab==="ia"||tab==="simulador"||tab==="perfil")&&((k==="jogos"&&(tab==="scanner"||tab==="agenda"))||(k==="analise"&&tab==="ia")||(k==="mais"&&(tab==="simulador"||tab==="perfil"))))} onClick={()=>setTab(k)} icon={ic} label={lb} badge={badge}/>
           )}
+                      {/* Botão especial Copa do Mundo */}
+          <button
+            onClick={() => setWcTab(true)}
+            style={{
+              display:"flex", alignItems:"center", gap:6,
+              padding:"8px 14px",
+              background: wcTab
+                ? "linear-gradient(135deg,rgba(245,166,35,0.25),rgba(56,211,159,0.10))"
+                : "linear-gradient(135deg,rgba(245,166,35,0.08),rgba(56,211,159,0.05))",
+              border:`1px solid ${wcTab ? "rgba(245,166,35,0.6)" : "rgba(245,166,35,0.25)"}`,
+              borderRadius:10, cursor:"pointer",
+              color: wcTab ? T.gold : "rgba(245,166,35,0.7)",
+              fontSize:12, fontWeight:800,
+              fontFamily:"'Barlow Condensed',sans-serif",
+              letterSpacing:0.4,
+              animation: "pulse 2s infinite",
+              whiteSpace:"nowrap",
+            }}
+          >
+            🏆 Copa 2026
+          </button>
+
         </nav>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           {profile.favTeamCrest&&<img src={profile.favTeamCrest} alt="" style={{height:26,opacity:0.85}} onError={e=>e.target.style.display="none"}/>}
@@ -2069,6 +2571,434 @@ ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% 
           </div>
         )}
 
+          </div>
+        )}
+        {/* ══ COPA DO MUNDO 2026 — ABA ESPECIAL ══ */}
+        {wcTab && (
+          <div style={{ position:"fixed", inset:0, zIndex:200, background:T.bg, overflowY:"auto" }}>
+            {/* Fundo especial animado */}
+            <div style={{
+              position:"fixed", inset:0, zIndex:-1, overflow:"hidden",
+              background:"linear-gradient(135deg,#05070f 0%,#0a1a0a 50%,#1a0a05 100%)",
+            }}>
+              <div style={{
+                position:"absolute", top:"-20%", left:"-10%",
+                width:"50%", height:"50%", borderRadius:"50%",
+                background:"radial-gradient(circle,rgba(245,166,35,0.06),transparent 70%)",
+              }}/>
+              <div style={{
+                position:"absolute", bottom:"-20%", right:"-10%",
+                width:"60%", height:"60%", borderRadius:"50%",
+                background:"radial-gradient(circle,rgba(56,211,159,0.04),transparent 70%)",
+              }}/>
+            </div>
+
+            {/* Header Copa */}
+            <div style={{
+              background:"linear-gradient(90deg,rgba(245,166,35,0.15),rgba(56,211,159,0.08),rgba(245,166,35,0.15))",
+              borderBottom:"1px solid rgba(245,166,35,0.3)",
+              padding:"0 24px", height:70,
+              display:"flex", alignItems:"center", justifyContent:"space-between",
+              position:"sticky", top:0, zIndex:100, backdropFilter:"blur(20px)",
+            }}>
+              <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                <div style={{
+                  width:48, height:48, borderRadius:14,
+                  background:"linear-gradient(135deg,rgba(245,166,35,0.25),rgba(56,211,159,0.10))",
+                  border:"2px solid rgba(245,166,35,0.4)",
+                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:26,
+                }}>🏆</div>
+                <div>
+                  <div style={{
+                    fontFamily:"'Barlow Condensed',sans-serif", fontSize:26,
+                    fontWeight:800, color:T.gold, letterSpacing:2,
+                  }}>COPA DO MUNDO 2026</div>
+                  <div style={{ fontSize:10, color:T.green, letterSpacing:3, textTransform:"uppercase" }}>
+                    🇺🇸 EUA · 🇨🇦 Canadá · 🇲🇽 México · Análise com Modelo Nacional
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                {/* Seletor de data */}
+                <div style={{ display:"flex", gap:5 }}>
+                  {[["Ontem",-1],["Hoje",0],["Amanhã",1]].map(([lb,off]) => {
+                    const d = new Date(); d.setDate(d.getDate() + off);
+                    const active = fmtISO(d) === fmtISO(wcDate);
+                    return (
+                      <button key={lb} onClick={() => setWcDate(d)} style={{
+                        padding:"6px 12px",
+                        background: active ? T.goldDim : "rgba(255,255,255,0.04)",
+                        border:`1px solid ${active ? "rgba(245,166,35,0.5)" : T.border}`,
+                        borderRadius:8, cursor:"pointer",
+                        color: active ? T.gold : T.muted, fontSize:11, fontWeight:active?700:400,
+                      }}>{lb}</button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setWcTab(false)}
+                  style={{
+                    padding:"8px 18px",
+                    background:"rgba(255,255,255,0.05)",
+                    border:`1px solid ${T.border}`,
+                    borderRadius:9, cursor:"pointer",
+                    color:T.muted, fontSize:12, fontWeight:600,
+                  }}
+                >✕ Fechar</button>
+              </div>
+            </div>
+
+            <div style={{ padding:"28px 28px 80px", maxWidth:1200, margin:"0 auto" }}>
+
+              {/* Botões de ação */}
+              <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
+                <button
+                  onClick={runWcScanner}
+                  disabled={wcScanning}
+                  style={{
+                    padding:"12px 28px",
+                    background: wcScanning
+                      ? T.card2
+                      : "linear-gradient(135deg,rgba(245,166,35,0.2),rgba(56,211,159,0.1))",
+                    border:`2px solid ${wcScanning ? T.border : "rgba(245,166,35,0.5)"}`,
+                    borderRadius:12, cursor: wcScanning ? "not-allowed" : "pointer",
+                    color: wcScanning ? T.muted : T.gold,
+                    fontSize:14, fontWeight:800,
+                    fontFamily:"'Barlow Condensed',sans-serif",
+                    opacity: wcScanning ? 0.6 : 1,
+                  }}
+                >
+                  {wcScanning ? "🔄 Analisando Copa..." : "🔍 Escanear Jogos da Copa"}
+                </button>
+                <button
+                  onClick={loadWcFixtures}
+                  disabled={wcLoading}
+                  style={{
+                    padding:"12px 22px",
+                    background:"rgba(255,255,255,0.04)",
+                    border:`1px solid ${T.border}`,
+                    borderRadius:12, cursor:"pointer",
+                    color:T.muted, fontSize:13, fontWeight:700,
+                    fontFamily:"'Barlow Condensed',sans-serif",
+                  }}
+                >
+                  {wcLoading ? "Buscando..." : "📅 Ver Jogos do Dia"}
+                </button>
+              </div>
+
+              {wcError && (
+                <div style={{
+                  background:T.redDim, border:"1px solid rgba(255,83,112,0.3)",
+                  borderRadius:12, padding:"14px 18px",
+                  color:T.red, marginBottom:20, fontSize:13,
+                }}>{wcError}</div>
+              )}
+
+              {(wcScanning || wcLoading) && <Spinner label="Consultando SofaScore para dados da Copa do Mundo..."/>}
+
+              {/* Jogos simples (sem análise) */}
+              {!wcLoading && wcFixtures.length > 0 && wcScanResults.length === 0 && (
+                <div style={{ marginBottom:28 }}>
+                  <div style={{
+                    fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700,
+                    fontSize:18, color:T.gold, marginBottom:14,
+                  }}>📅 Jogos — {fmtBR(wcDate)}</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {wcFixtures.map((f, i) => {
+                      const kt = new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                      return (
+                        <div key={i} style={{
+                          background:"rgba(255,255,255,0.03)",
+                          border:"1px solid rgba(245,166,35,0.15)",
+                          borderRadius:14, padding:"16px 20px",
+                          display:"flex", alignItems:"center", gap:16,
+                        }}>
+                          <div style={{
+                            fontFamily:"'Barlow Condensed',sans-serif",
+                            fontSize:22, fontWeight:800, color:T.gold, minWidth:55,
+                          }}>{kt}</div>
+                          <div style={{ display:"flex", alignItems:"center", gap:12, flex:1 }}>
+                            {f.homeTeam?.crest && (
+                              <img src={f.homeTeam.crest} alt="" style={{ height:32 }}
+                                onError={e => e.target.style.display="none"}/>
+                            )}
+                            <span style={{ fontSize:16, fontWeight:700, color:T.text }}>
+                              {f.homeTeam?.name}
+                            </span>
+                            {f.score?.fullTime?.home != null ? (
+                              <span style={{
+                                fontFamily:"'Barlow Condensed',sans-serif",
+                                fontSize:26, fontWeight:800, color:T.gold, margin:"0 8px",
+                              }}>{f.score.fullTime.home} – {f.score.fullTime.away}</span>
+                            ) : (
+                              <span style={{ color:T.muted, margin:"0 8px", fontSize:14 }}>vs</span>
+                            )}
+                            {f.awayTeam?.crest && (
+                              <img src={f.awayTeam.crest} alt="" style={{ height:32 }}
+                                onError={e => e.target.style.display="none"}/>
+                            )}
+                            <span style={{ fontSize:16, fontWeight:700, color:T.text }}>
+                              {f.awayTeam?.name}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelFix(f);
+                              setSelLeague(WC_LEAGUE);
+                              loadAnalysis(f);
+                              setWcTab(false);
+                            }}
+                            style={{
+                              padding:"8px 18px",
+                              background:"rgba(245,166,35,0.12)",
+                              border:"1px solid rgba(245,166,35,0.35)",
+                              borderRadius:9, cursor:"pointer",
+                              color:T.gold, fontSize:12, fontWeight:800,
+                              fontFamily:"'Barlow Condensed',sans-serif",
+                            }}
+                          >📊 Analisar</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Resultados do scanner Copa */}
+              {!wcScanning && wcScanResults.length > 0 && (
+                <div>
+                  <div style={{
+                    display:"flex", alignItems:"center", gap:12,
+                    marginBottom:18, flexWrap:"wrap",
+                  }}>
+                    <div style={{
+                      fontFamily:"'Barlow Condensed',sans-serif",
+                      fontSize:20, fontWeight:800, color:T.gold,
+                    }}>
+                      🏆 {wcScanResults.length} jogos analisados · {fmtBR(wcDate)}
+                    </div>
+                    <span style={{
+                      fontSize:10, color:T.green,
+                      background:T.greenDim,
+                      border:`1px solid ${T.borderG}`,
+                      borderRadius:6, padding:"2px 8px",
+                    }}>
+                      Modelo Nacional · Monte Carlo 500sim · xG SofaScore
+                    </span>
+                  </div>
+
+                  <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                    {wcScanResults.map((r, i) => {
+                      const f = r.fixture;
+                      const kt = new Date(f.utcDate).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+                      const best = r.bestMarkets[0];
+                      const conf = best?.confidence || 50;
+                      const confColor = conf >= 70 ? T.green : conf >= 50 ? T.gold : T.red;
+
+                      return (
+                        <div key={i} style={{
+                          background: i === 0
+                            ? "linear-gradient(135deg,rgba(245,166,35,0.08),rgba(12,16,24,1))"
+                            : "rgba(255,255,255,0.02)",
+                          border:`${i === 0 ? "2px" : "1px"} solid ${i === 0 ? "rgba(245,166,35,0.4)" : "rgba(245,166,35,0.12)"}`,
+                          borderRadius:16, padding:"20px 22px",
+                        }}>
+                          {/* Header do jogo */}
+                          <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:14, flexWrap:"wrap" }}>
+                            <div style={{ fontSize:10, color:T.muted, minWidth:55 }}>⏰ {kt}</div>
+                            <div style={{ display:"flex", alignItems:"center", gap:10, flex:1 }}>
+                              {f.homeTeam?.crest && (
+                                <img src={f.homeTeam.crest} alt="" style={{ height:28 }}
+                                  onError={e => e.target.style.display="none"}/>
+                              )}
+                              <span style={{ fontSize:15, fontWeight:800, color:T.text }}>
+                                {f.homeTeam?.name}
+                              </span>
+                              <span style={{ color:T.muted }}>vs</span>
+                              {f.awayTeam?.crest && (
+                                <img src={f.awayTeam.crest} alt="" style={{ height:28 }}
+                                  onError={e => e.target.style.display="none"}/>
+                              )}
+                              <span style={{ fontSize:15, fontWeight:800, color:T.text }}>
+                                {f.awayTeam?.name}
+                              </span>
+                            </div>
+                            {/* Score de valor */}
+                            <div style={{ textAlign:"center", minWidth:60 }}>
+                              <div style={{ fontSize:9, color:T.muted, marginBottom:2 }}>Score</div>
+                              <div style={{
+                                fontFamily:"'Barlow Condensed',sans-serif",
+                                fontSize:28, fontWeight:800,
+                                color: r.valueScore >= 20 ? T.green : T.muted,
+                              }}>{r.valueScore}</div>
+                            </div>
+                          </div>
+
+                          {/* Dados do modelo */}
+                          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:14 }}>
+                            {[
+                              { l:"λ Casa",    v: best?.lambdaHome?.toFixed(2) || "—", c:T.green },
+                              { l:"λ Visit.",  v: best?.lambdaAway?.toFixed(2) || "—", c:T.blue  },
+                              { l:"xG Casa",   v: best?.xGHome?.toFixed(2)     || "—", c:T.green },
+                              { l:"Confiança", v: conf + "%",                          c:confColor},
+                            ].map(({ l, v, c }) => (
+                              <div key={l} style={{
+                                background:"rgba(255,255,255,0.03)",
+                                border:"1px solid rgba(255,255,255,0.06)",
+                                borderRadius:10, padding:"10px 12px", textAlign:"center",
+                              }}>
+                                <div style={{ fontSize:9, color:T.muted, marginBottom:3 }}>{l}</div>
+                                <div style={{
+                                  fontFamily:"'Barlow Condensed',sans-serif",
+                                  fontSize:20, fontWeight:800, color:c,
+                                }}>{v}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* H2H rápido */}
+                          {r.h2h?.total > 0 && (
+                            <div style={{
+                              display:"flex", gap:12, alignItems:"center",
+                              padding:"8px 12px",
+                              background:"rgba(255,255,255,0.02)",
+                              border:`1px solid ${T.border}`,
+                              borderRadius:9, marginBottom:12, flexWrap:"wrap",
+                            }}>
+                              <span style={{ fontSize:10, color:T.muted }}>
+                                H2H ({r.h2h.total} jogos):
+                              </span>
+                              <span style={{ fontSize:11, fontWeight:700, color:T.green }}>
+                                Casa {r.h2h.homeWins}V
+                              </span>
+                              <span style={{ fontSize:11, color:T.muted }}>
+                                {r.h2h.draws}E
+                              </span>
+                              <span style={{ fontSize:11, fontWeight:700, color:T.blue }}>
+                                {r.h2h.awayWins}V Visit.
+                              </span>
+                              {r.h2h.avgGoals && (
+                                <span style={{ fontSize:11, color:T.gold }}>
+                                  · {r.h2h.avgGoals} gols/j médio
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Desfalques */}
+                          {r.lineups?.confirmed && (
+                            <div style={{
+                              display:"flex", gap:12, marginBottom:12, flexWrap:"wrap",
+                            }}>
+                              {r.lineups.home.keyMissing > 0 && (
+                                <div style={{
+                                  padding:"4px 10px",
+                                  background:"rgba(255,83,112,0.08)",
+                                  border:"1px solid rgba(255,83,112,0.2)",
+                                  borderRadius:7, fontSize:11, color:T.red,
+                                }}>
+                                  🚑 Casa: {r.lineups.home.keyMissing} desfalque(s)
+                                </div>
+                              )}
+                              {r.lineups.away.keyMissing > 0 && (
+                                <div style={{
+                                  padding:"4px 10px",
+                                  background:"rgba(255,83,112,0.08)",
+                                  border:"1px solid rgba(255,83,112,0.2)",
+                                  borderRadius:7, fontSize:11, color:T.red,
+                                }}>
+                                  🚑 Visit.: {r.lineups.away.keyMissing} desfalque(s)
+                                </div>
+                              )}
+                              {r.lineups.home.keyMissing === 0 && r.lineups.away.keyMissing === 0 && (
+                                <div style={{
+                                  padding:"4px 10px",
+                                  background:T.greenDim,
+                                  border:`1px solid ${T.borderG}`,
+                                  borderRadius:7, fontSize:11, color:T.green,
+                                }}>
+                                  ✅ Escalações completas confirmadas
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Melhores mercados */}
+                          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+                            {r.bestMarkets.slice(0, 3).map((m, j) => (
+                              <div key={j} style={{
+                                padding:"6px 12px",
+                                background:"rgba(245,166,35,0.08)",
+                                border:"1px solid rgba(245,166,35,0.25)",
+                                borderRadius:8,
+                              }}>
+                                <span style={{ fontSize:11, color:T.gold, fontWeight:700 }}>
+                                  {m.name}
+                                </span>
+                                <span style={{ fontSize:11, color:T.green, marginLeft:6 }}>
+                                  @{m.odd.toFixed(2)} EV+{m.ev}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Ações */}
+                          <div style={{ display:"flex", gap:8 }}>
+                            <button
+                              onClick={() => {
+                                setSelLeague(WC_LEAGUE);
+                                setSelDate(wcDate);
+                                loadAnalysis(r.fixture);
+                                setWcTab(false);
+                              }}
+                              style={{
+                                padding:"8px 18px",
+                                background:"rgba(245,166,35,0.12)",
+                                border:"1px solid rgba(245,166,35,0.35)",
+                                borderRadius:9, cursor:"pointer",
+                                color:T.gold, fontSize:12, fontWeight:800,
+                                fontFamily:"'Barlow Condensed',sans-serif",
+                              }}
+                            >📊 Análise Completa + IA</button>
+                            {r.bestMarkets[0] && (
+                              <button
+                                onClick={() => addBet(r.bestMarkets[0], null, r.fixture)}
+                                style={{
+                                  padding:"8px 14px",
+                                  background:T.goldDim,
+                                  border:"1px solid rgba(245,166,35,0.3)",
+                                  borderRadius:9, cursor:"pointer",
+                                  color:T.gold, fontSize:11, fontWeight:700,
+                                  fontFamily:"'Barlow Condensed',sans-serif",
+                                }}
+                              >+ Apostar</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!wcScanning && !wcLoading && wcScanResults.length === 0 && wcFixtures.length === 0 && !wcError && (
+                <div style={{ textAlign:"center", padding:80 }}>
+                  <div style={{ fontSize:72, marginBottom:20 }}>🏆</div>
+                  <div style={{
+                    fontFamily:"'Barlow Condensed',sans-serif",
+                    fontSize:24, fontWeight:800, color:T.gold, marginBottom:10,
+                  }}>Copa do Mundo 2026</div>
+                  <div style={{ fontSize:14, color:T.muted, marginBottom:8 }}>
+                    EUA · Canadá · México · 48 seleções · 104 jogos
+                  </div>
+                  <div style={{ fontSize:12, color:T.dim, maxWidth:400, margin:"0 auto" }}>
+                    Clique em <strong style={{ color:T.gold }}>Escanear Jogos da Copa</strong> para análise completa com
+                    modelo nacional (xG SofaScore, H2H, escalações, Monte Carlo 500 simulações).
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
