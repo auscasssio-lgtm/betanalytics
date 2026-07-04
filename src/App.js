@@ -901,7 +901,7 @@ function Setup({ onSave }) {
   const [odds, setOdds] = useState("");
   const [ant, setAnt] = useState("");
   const ok = odds.trim() !== "";
-  
+
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow',sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet" />
@@ -931,7 +931,6 @@ function Setup({ onSave }) {
     </div>
   );
 }
-
 /* ═══════════════════════════════════════════ MAIN APP */
 export default function App(){
   const[fdKey,setFdKey]=useState(()=>{try{return localStorage.getItem("bta_fd3")||""}catch{return ""}});
