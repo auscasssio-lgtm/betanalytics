@@ -1135,27 +1135,7 @@ const loadAnalysis = useCallback(async (fixture) => {
   }
 }, [oddsKey, selLeague, selDate, dateStr, gptKey]);
 
-  /* ── LIVE TRACKING ── */
-  const loadLiveGames=useCallback(async()=>{
-    setLoadingLive(true);
-    try{
-      const ds=fmtISO(nowDate());
-      const activeLeagues=["PL","BSA","PD","SA","BL1","FL1","CL","CLI","CSA","WC"];
-      const live=[];
-      for(const code of activeLeagues){
-        try{
-          const data=await fdFetch(`competitions/${code}/matches?status=IN_PLAY`,fdKey);
-          (data.matches||[]).forEach(m=>{
-            live.push({...m,leagueCode:code,leagueName:LEAGUES.find(l=>l.code===code)?.name||code,leagueFlag:LEAGUES.find(l=>l.code===code)?.flag||"⚽"});
-          });
-          await sleep(1500);
-        }catch{}
-      }
-      setLiveGames(live);
-    }catch(e){console.warn("Live error:",e.message);}
-    finally{setLoadingLive(false);}
-  },[fdKey]);
-
+  
      
   /* ── SCANNER (CORRIGIDO) ── */
 const runScanner=useCallback(async()=>{
