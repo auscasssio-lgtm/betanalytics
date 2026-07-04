@@ -861,31 +861,36 @@ function MarketCard({m,i,onRegister,onAddCombinada,bankroll,currency,strategy,is
 
 
 /* ═══════════════════════════════════════════ SETUP */
-function Setup({onSave}){
-  const[fd,setFd]=useState("");const[odds,setOdds]=useState("");const[ant,setAnt]=useState("");
-  const ok=fd.trim()&&odds.trim();
-  return(
-    <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow',sans-serif"}}>
-      <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet"/>
-      <div style={{maxWidth:540,width:"100%",padding:"0 24px"}}>
-        <div style={{textAlign:"center",marginBottom:40}}>
-          <div style={{width:72,height:72,borderRadius:20,background:T.greenDim,border:`2px solid ${T.borderG}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,margin:"0 auto 20px"}}>⚽</div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:38,fontWeight:800,color:T.text,letterSpacing:1}}>BETANALYTICS</div>
-          <div style={{fontSize:13,color:T.muted,marginTop:8}}>Dashboard profissional · Dados reais · Temporada atual</div>
+function Setup({ onSave }) {
+  const [odds, setOdds] = useState("");
+  const [ant, setAnt] = useState("");
+  const ok = odds.trim() !== "";
+  
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow',sans-serif" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet" />
+      <div style={{ maxWidth: 540, width: "100%", padding: "0 24px" }}>
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: T.greenDim, border: `2px solid ${T.borderG}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, margin: "0 auto 20px" }}>⚽</div>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 38, fontWeight: 800, color: T.text, letterSpacing: 1 }}>BETANALYTICS</div>
+          <div style={{ fontSize: 13, color: T.muted, marginTop: 8 }}>Dashboard profissional · Dados reais via SofaScore</div>
         </div>
-        {[{label:"Football-Data.org",desc:"Jogos, stats, escudos · gratuito",color:T.green,link:"https://football-data.org/client/register",val:fd,set:setFd,ph:"Chave Football-Data.org..."},{label:"The Odds API",desc:"Odds reais das casas · 500 req/mês grátis",color:T.gold,link:"https://the-odds-api.com/#get-access",val:odds,set:setOdds,ph:"Chave The Odds API..."},{label:"Anthropic API",desc:"Análise IA com Claude · ~$0.001/análise",color:T.purple,link:"https://console.anthropic.com",val:ant,set:setAnt,ph:"Chave Anthropic (sk-ant-...) — opcional"}].map(({label,desc,color,link,val,set,ph})=>(
-          <Card key={label} style={{marginBottom:14}} glow={!!val}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-              <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color}}>{label}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{desc}</div></div>
-              <a href={link} target="_blank" rel="noreferrer" style={{fontSize:11,color:T.blue}}>Criar conta →</a>
+        {[
+          { label: "The Odds API", desc: "Odds reais das casas · 500 req/mês grátis", color: T.gold, link: "https://the-odds-api.com/#get-access", val: odds, set: setOdds, ph: "Chave The Odds API..." },
+          { label: "Anthropic API", desc: "Análise IA com Claude · ~$0.001/análise", color: T.purple, link: "https://console.anthropic.com", val: ant, set: setAnt, ph: "Chave Anthropic (sk-ant-...) — opcional" }
+        ].map(({ label, desc, color, link, val, set, ph }) => (
+          <Card key={label} style={{ marginBottom: 14 }} glow={!!val}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+              <div><div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 16, color }}>{label}</div><div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{desc}</div></div>
+              <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: T.blue }}>Criar conta →</a>
             </div>
-            <input type="password" placeholder={ph} value={val} onChange={e=>set(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,0.04)",border:`1px solid ${val?"rgba(56,211,159,0.3)":T.border}`,borderRadius:10,padding:"13px 15px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+            <input type="password" placeholder={ph} value={val} onChange={e => set(e.target.value)} style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: `1px solid ${val ? "rgba(56,211,159,0.3)" : T.border}`, borderRadius: 10, padding: "13px 15px", color: T.text, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
           </Card>
         ))}
-        <button onClick={()=>ok&&onSave(fd.trim(),odds.trim(),ant.trim())} disabled={!ok} style={{width:"100%",background:ok?T.greenDim:"rgba(255,255,255,0.03)",border:`1px solid ${ok?T.borderG:T.border}`,borderRadius:12,padding:15,color:ok?T.green:T.muted,fontSize:16,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",cursor:ok?"pointer":"not-allowed",transition:"all 0.2s",marginBottom:12}}>
+        <button onClick={() => ok && onSave(odds.trim(), ant.trim())} disabled={!ok} style={{ width: "100%", background: ok ? T.greenDim : "rgba(255,255,255,0.03)", border: `1px solid ${ok ? T.borderG : T.border}`, borderRadius: 12, padding: 15, color: ok ? T.green : T.muted, fontSize: 16, fontWeight: 800, fontFamily: "'Barlow Condensed',sans-serif", cursor: ok ? "pointer" : "not-allowed", transition: "all 0.2s", marginBottom: 12 }}>
           Entrar no Dashboard →
         </button>
-        <div style={{padding:"11px 15px",background:T.redDim,border:"1px solid rgba(255,83,112,0.2)",borderRadius:10,fontSize:11,color:T.red}}>🔒 Suas chaves ficam salvas <strong>apenas no seu navegador</strong>. Nunca as compartilhe.</div>
+        <div style={{ padding: "11px 15px", background: T.redDim, border: "1px solid rgba(255,83,112,0.2)", borderRadius: 10, fontSize: 11, color: T.red }}>🔒 Suas chaves ficam salvas <strong>apenas no seu navegador</strong>. Nunca as compartilhe.</div>
       </div>
     </div>
   );
@@ -999,47 +1004,136 @@ export default function App(){
     }
   },[hotGames.length,alertEnabled]);
 
-  /* ── LOAD FIXTURES ── */
-  const loadFixtures=useCallback(async()=>{
-    setLoadingFix(true);setErr("");setFixtures([]);setSelFix(null);setAnalysis(null);
-    try{const data=await fdFetch(`competitions/${selLeague.code}/matches?dateFrom=${dateStr}&dateTo=${dateStr}`,fdKey);setFixtures(data.matches||[]);if(!(data.matches||[]).length)setErr(`Nenhum jogo em ${fmtBR(selDate)} para ${selLeague.name}.`);}
-    catch(e){setErr("Erro: "+e.message);}finally{setLoadingFix(false);}
-  },[fdKey,selLeague,dateStr,selDate]);
+    /* ── LOAD FIXTURES (Refatorado para SofaScore) ── */
+const loadFixtures = useCallback(async () => {
+  setLoadingFix(true); setErr(""); setFixtures([]); setSelFix(null); setAnalysis(null);
+  try {
+    const events = await sofaGetFixtures(selLeague.sofaId, dateStr);
+    const mappedFixtures = events.map(sofaEventToFixture);
+    setFixtures(mappedFixtures);
+    
+    if (!mappedFixtures.length) setErr(`Nenhum jogo em ${fmtBR(selDate)} para ${selLeague.name}.`);
+  } catch (e) { 
+    setErr("Erro: " + e.message); 
+  } finally { 
+    setLoadingFix(false); 
+  }
+}, [selLeague, dateStr, selDate]);
 
-    /* ── LOAD ANALYSIS ── */
-  const loadAnalysis=useCallback(async(fixture)=>{
-    setSelFix(fixture);setAnalysis(null);setLoadingAna(true);setErr("");setGptAnalysis(null);setGptErr("");setTab("analise");setShowRawData(false);setAnaStep(1);
-    try{
-      const hr=await fdFetch(`teams/${fixture.homeTeam.id}/matches?limit=12&status=FINISHED`,fdKey);
-      await sleep(6500);
-      setAnaStep(2);
-      const ar=await fdFetch(`teams/${fixture.awayTeam.id}/matches?limit=12&status=FINISHED`,fdKey);
-      const hs=parseStatsFD(hr,fixture.homeTeam.id);
-      const as_=parseStatsFD(ar,fixture.awayTeam.id);
-      let oddsData=null;
-      try{const allOdds=await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`,oddsKey);oddsData=Array.isArray(allOdds)?allOdds.find(o=>(o.home_team||"").toLowerCase().includes((fixture.homeTeam.name||"").toLowerCase().split(" ")[0])):null;}catch{}
-      setAnaStep(3);
-      const builtMarkets=buildMarkets(hs,as_,oddsData,selLeague.code);
-      // Extrai bookmakers para comparação de odds
-      const bookmakers=oddsData?.bookmakers?.map(b=>{
-        const bk={name:b.title||b.key};
-        b.markets?.forEach(mkt=>{
-          if(mkt.key==="h2h")mkt.outcomes?.forEach(o=>{if(o.name==="Home")bk.home=o.price;if(o.name==="Away")bk.away=o.price;if(o.name==="Draw")bk.draw=o.price;});
-          if(mkt.key==="totals")mkt.outcomes?.forEach(o=>{if(o.name==="Over"&&Math.abs((o.point||0)-2.5)<0.1)bk.over25=o.price;if(o.name==="Under"&&Math.abs((o.point||0)-2.5)<0.1)bk.under25=o.price;});
+/* ── LIVE TRACKING (Refatorado para SofaScore) ── */
+const loadLiveGames = useCallback(async () => {
+  setLoadingLive(true);
+  try {
+    const ds = fmtISO(nowDate());
+    const live = [];
+    
+    // Busca os jogos de hoje nas ligas ativas e filtra apenas os que estão em andamento
+    for (const league of LEAGUES) {
+      try {
+        const events = await sofaGetFixtures(league.sofaId, ds);
+        const inPlayEvents = events.filter(ev => ev.status?.type === "inprogress" || ev.status?.type === "live");
+        
+        inPlayEvents.forEach(ev => {
+          live.push({
+            ...sofaEventToFixture(ev),
+            leagueCode: league.code,
+            leagueName: league.name,
+            leagueFlag: league.flag
+          });
         });
-        return bk;
-      }).filter(b=>Object.keys(b).length>1)||[];
-      setAnalysis({fixture,hs,as_,markets:builtMarkets,hasOdds:!!oddsData,bookmakers});
-      setLoadingGpt(true);
-      try{
-        const currentGptKey = localStorage.getItem("bta_gpt") || gptKey;
-        const result=await claudeAnalysis(fixture,hs,as_,builtMarkets,selLeague.name,fmtBR(selDate),currentGptKey);
-        setGptAnalysis(result);
-      }catch(e){setGptErr("Erro IA: "+e.message);}
-      finally{setLoadingGpt(false);}
-    }catch(e){setErr("Erro na análise: "+e.message);}finally{setLoadingAna(false);setAnaStep(0);}
-  },[fdKey,oddsKey,selLeague,selDate,dateStr,gptKey]);
+        await sleep(500); // Pausa leve para evitar rate limit
+      } catch {}
+    }
+    setLiveGames(live);
+  } catch (e) {
+    console.warn("Live error:", e.message);
+  } finally {
+    setLoadingLive(false);
+  }
+}, []);
 
+    /* /* ── LOAD ANALYSIS (Refatorado para SofaScore) ── */
+const loadAnalysis = useCallback(async (fixture) => {
+  setSelFix(fixture); setAnalysis(null); setLoadingAna(true); setErr(""); 
+  setGptAnalysis(null); setGptErr(""); setTab("analise"); setShowRawData(false); setAnaStep(1);
+  
+  try {
+    const evId = fixture._sofaId || fixture.id;
+
+    // 1. Fetch unificado via SofaScore
+    const [h2h, stats, lineups, homeForm, awayForm] = await Promise.all([
+      sofaGetH2H(evId),
+      sofaGetStats(evId),
+      sofaGetLineups(evId),
+      sofaGetTeamForm(fixture.homeTeam.id),
+      sofaGetTeamForm(fixture.awayTeam.id)
+    ]);
+    setAnaStep(2);
+
+    // 2. Transforma o form do SofaScore no padrão que a engine espera
+    const buildStats = (formObj) => {
+      if (!formObj.form || formObj.form.length < 3) return null;
+      return {
+        goalsFor: formObj.form.reduce((s, x) => s + x.gf, 0) / formObj.form.length,
+        goalsAgainst: formObj.form.reduce((s, x) => s + x.ga, 0) / formObj.form.length,
+        ppg: formObj.form.filter(x => x.result === "W").length / formObj.form.length * 3,
+        winRateHome: 50, winRateAway: 50, btts: 50, played: formObj.form.length,
+        form: formObj.form.map(x => x.result)
+      };
+    };
+
+    const hs = buildStats(homeForm);
+    const as_ = buildStats(awayForm);
+
+    let oddsData = null;
+    try {
+      const allOdds = await oddsFetch(`sports/${selLeague.oddsKey}/odds?regions=eu&markets=h2h,totals&dateFrom=${dateStr}T00:00:00Z&dateTo=${dateStr}T23:59:59Z`, oddsKey);
+      oddsData = Array.isArray(allOdds) ? allOdds.find(o => (o.home_team || "").toLowerCase().includes((fixture.homeTeam.name || "").toLowerCase().split(" ")[0])) : null;
+    } catch {}
+    setAnaStep(3);
+
+    // Contexto enriquecido SofaScore
+    const sofaCtx = {
+      xGHome: stats.xGHome ?? fixture._sofaHomeXG,
+      xGAway: stats.xGAway ?? fixture._sofaAwayXG,
+      homeRecentXG: homeForm.recentXG,
+      awayRecentXG: awayForm.recentXG,
+      homeForm: homeForm.form.map(f => f.result),
+      awayForm: awayForm.form.map(f => f.result),
+      homeMissingKey: lineups.home.keyMissing,
+      awayMissingKey: lineups.away.keyMissing,
+      lineupsConfirmed: lineups.confirmed,
+      h2hAvgGoals: h2h.avgGoals,
+      h2hTotal: h2h.total,
+    };
+
+    const builtMarkets = buildMarkets(hs, as_, oddsData, selLeague.code, sofaCtx);
+
+    const bookmakers = oddsData?.bookmakers?.map(b => {
+      const bk = { name: b.title || b.key };
+      b.markets?.forEach(mkt => {
+        if (mkt.key === "h2h") mkt.outcomes?.forEach(o => { if (o.name === "Home") bk.home = o.price; if (o.name === "Away") bk.away = o.price; if (o.name === "Draw") bk.draw = o.price; });
+        if (mkt.key === "totals") mkt.outcomes?.forEach(o => { if (o.name === "Over" && Math.abs((o.point || 0) - 2.5) < 0.1) bk.over25 = o.price; if (o.name === "Under" && Math.abs((o.point || 0) - 2.5) < 0.1) bk.under25 = o.price; });
+      });
+      return bk;
+    }).filter(b => Object.keys(b).length > 1) || [];
+
+    setAnalysis({ fixture, hs, as_, markets: builtMarkets, hasOdds: !!oddsData, bookmakers });
+    
+    setLoadingGpt(true);
+    try {
+      const currentGptKey = localStorage.getItem("bta_gpt") || gptKey;
+      const result = await claudeAnalysis(fixture, hs, as_, builtMarkets, selLeague.name, fmtBR(selDate), currentGptKey);
+      setGptAnalysis(result);
+    } catch (e) { setGptErr("Erro IA: " + e.message); }
+    finally { setLoadingGpt(false); }
+
+  } catch (e) { 
+    setErr("Erro na análise: " + e.message); 
+  } finally { 
+    setLoadingAna(false); setAnaStep(0); 
+  }
+}, [oddsKey, selLeague, selDate, dateStr, gptKey]);
 
   /* ── LIVE TRACKING ── */
   const loadLiveGames=useCallback(async()=>{
@@ -1194,27 +1288,41 @@ const runScanner=useCallback(async()=>{
 
 
 
-  /* ── AGENDA SEMANAL ── */
-  const loadAgenda=useCallback(async()=>{
-    setLoadingAgenda(true);
-    const today=nowDate();
-    const results=[];
-    for(const leagueCode of agendaLeagues){
-      const league=LEAGUES.find(l=>l.code===leagueCode);
-      if(!league)continue;
-      try{
-        const from=fmtISO(today);
-        const toD=new Date(today);toD.setDate(toD.getDate()+6);
-        const to=fmtISO(toD);
-        const data=await fdFetch(`competitions/${leagueCode}/matches?dateFrom=${from}&dateTo=${to}`,fdKey);
-        await sleep(6500);
-        (data.matches||[]).forEach(m=>{results.push({...m,leagueName:league.name,leagueFlag:league.flag});});
-      }catch(e){console.warn("Agenda skip:",leagueCode,e.message);}
+  //* ── AGENDA SEMANAL (Refatorado para SofaScore) ── */
+const loadAgenda = useCallback(async () => {
+  setLoadingAgenda(true);
+  const today = nowDate();
+  const results = [];
+  
+  for (const leagueCode of agendaLeagues) {
+    const league = LEAGUES.find(l => l.code === leagueCode);
+    if (!league) continue;
+    
+    try {
+      // Varre os próximos 7 dias para a liga selecionada
+      for(let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() + i);
+        const events = await sofaGetFixtures(league.sofaId, fmtISO(d));
+        
+        events.forEach(ev => {
+          results.push({
+            ...sofaEventToFixture(ev),
+            leagueName: league.name,
+            leagueFlag: league.flag
+          });
+        });
+        await sleep(300); // Proteção de rate limit no proxy
+      }
+    } catch (e) {
+      console.warn("Agenda skip:", leagueCode, e.message);
     }
-    results.sort((a,b)=>new Date(a.utcDate)-new Date(b.utcDate));
-    setAgenda(results);
-    setLoadingAgenda(false);
-  },[fdKey,agendaLeagues]);
+  }
+  
+  results.sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+  setAgenda(results);
+  setLoadingAgenda(false);
+}, [agendaLeagues]);
     /* ── COPA DO MUNDO: busca jogos do dia via SofaScore ── */
   const loadWcFixtures = useCallback(async () => {
     setWcLoading(true); setWcError(""); setWcFixtures([]);
@@ -3005,7 +3113,7 @@ ODD COMBINADA: ${combOdd.toFixed(2)} | PROB. COMBINADA: ${combProb.toFixed(1)}% 
       </main>
 
       <footer style={{borderTop:`1px solid ${T.border}`,padding:"11px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:10,color:"#151515"}}>⚽ BetAnalytics · football-data.org + the-odds-api.com</span>
+        <span style={{fontSize:10,color:"#151515"}}>⚽ BetAnalytics · SofaScore API + the-odds-api.com</span>
         <span style={{fontSize:10,color:T.red}}>⚠️ Jogue com responsabilidade. Apostas envolvem risco real de perda financeira.</span>
       </footer>
 
