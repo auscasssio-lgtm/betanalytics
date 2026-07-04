@@ -211,9 +211,11 @@ async function sofaFetch(path) {
 // Jogos de uma liga por data (YYYY-MM-DD)
 async function sofaGetFixtures(tournamentId, date) {
   try {
+    // Busca focada apenas na liga/torneio específico (evita timeout na Vercel)
     const data = await sofaFetch(`unique-tournament/${tournamentId}/events/date/${date}`);
     return data.events || [];
-  } catch {
+  } catch (err) {
+    console.error(`Erro ao buscar jogos do torneio ${tournamentId}:`, err);
     return [];
   }
 }
