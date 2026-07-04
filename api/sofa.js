@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // Recebe o path e o novo parâmetro de filtro
   const { path, filterTournament } = req.query;
   if (!path) return res.status(400).json({ error: 'Parâmetro "path" obrigatório.' });
 
@@ -28,7 +27,7 @@ export default async function handler(req, res) {
 
     let data = await response.json();
 
-    // 🔥 O TRUQUE: Filtra o arquivão gigantesco direto na Vercel!
+    // 🔥 O TRUQUE: Filtra os jogos da liga específica direto na Vercel!
     if (filterTournament && data.events) {
       const tId = Number(filterTournament);
       data.events = data.events.filter(ev => ev.tournament?.uniqueTournament?.id === tId);
